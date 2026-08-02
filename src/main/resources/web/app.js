@@ -2,6 +2,7 @@
 
 // Global variables
 let ws = null;
+let wsClientId = null;
 let logs = [];
 let commandHistory = [];
 let historyIndex = -1;
@@ -19,35 +20,39 @@ let networkChart = null;
 let latencyChart = null;
 const MAX_DATA_POINTS = 60;
 
-// ZenithProxy known commands
+// Terminal state
+let terminalScrollLocked = true;
+let terminalBusy = false;
+
+// ZenithProxy real commands (from CommandManager)
 const KNOWN_COMMANDS = [
-    'connect', 'disconnect', 'reconnect', 'cancel',
-    'help', 'modules', 'version', 'uptime', 'tps',
-    'config', 'save', 'reload',
-    'whitelist add', 'whitelist remove', 'whitelist list',
-    'ban', 'unban', 'ipban', 'ipunban',
-    'kick', 'kickall',
-    'msg', 'tell', 'say',
-    'list', 'who',
-    'queue', 'queuepos', 'priority',
-    'debug', 'dump', 'gc',
-    'abort', 'stop',
-    'sethome', 'home', 'home set',
-    'aim Assist', 'anti AFK', 'auto reconnect', 'auto disconnect',
-    'chat color', 'chat format', 'chat reply',
-    'client brand', 'client settings',
-    'fakeplayer',
-    'instant disconnect', 'instant connect',
-    'login', 'logout',
-    'replace chat', 'replace chat add', 'replace chat remove',
-    'schematic', 'schematic save', 'schematic load',
-    'rotate', 'look', 'face', 'walk',
-    'path', 'goto', 'follow',
-    'inventory', 'inv see', 'inv swap',
-    'stack', 'drop', 'click',
-    'use', 'attack', 'attack entity',
-    'baritone', 'b',
-    'echo', 'print', 'log',
+    'help', 'connect', 'disconnect', 'reconnect', 'cancel',
+    'auth', 'whitelist', 'friend', 'ignore', 'kick',
+    'server', 'server switch', 'transfer',
+    'status', 'debug', 'plugins', 'update',
+    'autoReconnect', 'autoDisconnect', 'autoReply', 'autoRespawn',
+    'autoEat', 'autoFish', 'autoMend', 'autoTotem', 'autoDrop', 'autoArmor', 'autoOmen',
+    'antiAFK', 'antiKick', 'antiLeak',
+    'chatRelay', 'chatHistory', 'extraChat', 'chatSchema',
+    'commandConfig', 'database', 'theme',
+    'inventory', 'click', 'respawn',
+    'killAura', 'raycast',
+    'pathfinder', 'tasks', 'waypoints',
+    'map', 'displayCoords', 'coordinateObfuscation',
+    'queueStatus', 'queueWarning', 'prio', 'activeHours',
+    'connectionTest', 'clientConnection', 'serverConnection',
+    'packetLog', 'schematic', 'replay',
+    'stats', 'playtime', 'sessionTimeLimit', 'seen',
+    'skin', 'tablist', 'spectator', 'spook',
+    'stalk', 'spawnPatrol', 'visualRange',
+    'spammer', 'sendMessage', 'rateLimiter',
+    'tickRate', 'releaseChannel', 'viaVersion',
+    'multi', 'terminal', 'shutdown',
+    'jvmArgs', 'unsupported',
+    'modulePriority', 'actionLimiter',
+    'chatColor', 'chatFormat',
+    'discordManage', 'discordNotifications',
+    'license',
 ];
 
 // Initialize
@@ -58,8 +63,23 @@ document.addEventListener('DOMContentLoaded', () => {
     initConfigTabs();
     initCharts();
     loadDashboard();
+    loadCommands();
     startSystemPolling();
 });
+
+// Fetch real commands from server
+let serverCommands = KNOWN_COMMANDS;
+async function loadCommands() {
+    try {
+        const response = await fetch(API_BASE + '/commands');
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) {
+            serverCommands = data.sort();
+        }
+    } catch (e) {
+        console.log('Using default command list');
+    }
+}
 
 // ── Navigation ────────────────────────────────
 function initNavigation() {
@@ -546,8 +566,8 @@ function showAutocomplete(value) {
     const dropdown = document.getElementById('autocompleteDropdown');
     const query = value.trim().toLowerCase();
     autocompleteSuggestions = !query
-        ? [...KNOWN_COMMANDS]
-        : KNOWN_COMMANDS.filter(cmd => cmd.toLowerCase().includes(query));
+        ? [...serverCommands]
+        : serverCommands.filter(cmd => cmd.toLowerCase().includes(query));
 
     if (autocompleteSuggestions.length === 0) { hideAutocomplete(); return; }
 
@@ -590,22 +610,28 @@ function hideAutocomplete() {
 }
 
 async function executeCommand(command) {
-    if (!command.trim()) return;
+    // This is now handled by sendTerminalCommand via WebSocket
+    sendTerminalCommand(command);
+}
 
+function sendTerminalCommand(command) {
+    if (!command.trim()) return;
+    if (terminalBusy) {
+        appendTerminalLine('命令正在执行中... / Command still running...', 'terminal-line-warn');
+        return;
+    }
     commandHistory.push(command);
     historyIndex = -1;
+    terminalBusy = true;
 
-    appendTerminalLine(`> ${command}`, 'terminal-line-command');
+    // Show command with prompt
+    appendTerminalLine(`root@zenith $ ${command}`, 'terminal-line-command');
 
-    const result = await apiCall('/commands', 'POST', { command });
-    if (result) {
-        if (result.output && Array.isArray(result.output)) {
-            result.output.forEach(line => appendTerminalLine(line, 'terminal-line-output'));
-        } else if (result.success) {
-            appendTerminalLine('命令执行成功 / Command executed', 'terminal-line-success');
-        } else {
-            appendTerminalLine('错误 / Error: ' + (result.error || '未知错误'), 'terminal-line-error');
-        }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'command', data: command }));
+    } else {
+        appendTerminalLine('WebSocket 未连接 / Not connected', 'terminal-line-error');
+        terminalBusy = false;
     }
 }
 
@@ -661,8 +687,9 @@ function appendTerminalLine(text, className) {
 function clearTerminal() {
     document.getElementById('terminalOutput').innerHTML = `
         <div class="terminal-welcome">
-            <p>ZenithProxy 终端 <span class="en">Terminal</span></p>
-            <p>实时日志与命令执行 <span class="en">Live logs &amp; command execution</span></p>
+            <p style="color:var(--ctp-green);">ZenithProxy Terminal v26.1.2</p>
+            <p style="color:var(--ctp-overlay1);">Type 'help' for available commands</p>
+            <p style="color:var(--ctp-overlay0);font-size:0.75rem;">Tab: autocomplete | Up/Down: history | PgUp/PgDn: scroll</p>
         </div>
     `;
     logs = [];
@@ -711,12 +738,41 @@ function initWebSocket() {
     try {
         ws = new WebSocket(`ws://${window.location.hostname}:${wsPort}`);
 
-        ws.onopen = () => updateConnectionStatus(true);
+        ws.onopen = () => {
+            updateConnectionStatus(true);
+            appendTerminalLine('已连接到 ZenithProxy 终端 / Connected to ZenithProxy Terminal', 'terminal-line-success');
+        };
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (data.type === 'log') addLogEntry(data.data);
-            if (data.type === 'status') updateDashboardStatus(data.data);
+            switch (data.type) {
+                case 'welcome':
+                    wsClientId = data.data?.clientId;
+                    break;
+                case 'log':
+                    addLogEntry(data.data);
+                    break;
+                case 'terminal':
+                    // Skip - we already echo commands in sendTerminalCommand
+                    break;
+                case 'command_result':
+                    terminalBusy = false;
+                    const result = data.data;
+                    if (result.success) {
+                        if (result.output && Array.isArray(result.output)) {
+                            result.output.forEach(line => appendTerminalLine(line, 'terminal-line-output'));
+                        } else if (result.message) {
+                            appendTerminalLine(result.message, 'terminal-line-success');
+                        }
+                        // Don't show "OK" for empty success - just mark as done
+                    } else {
+                        appendTerminalLine('Error: ' + (result.error || 'Unknown error'), 'terminal-line-error');
+                    }
+                    break;
+                case 'status':
+                    updateDashboardStatus(data.data);
+                    break;
+            }
         };
 
         ws.onclose = () => {

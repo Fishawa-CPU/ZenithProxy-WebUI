@@ -211,15 +211,26 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
-            if (!"POST".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of("error", "POST only")); return; }
-            try {
-                String body = new String(exchange.getRequestBody().readAllBytes());
-                String command = body.replaceAll(".*\"command\"\\s*:\\s*\"", "").replaceAll("\".*", "");
-                CommandContext context = CommandContext.create(command, CommandSources.TERMINAL);
-                COMMAND.execute(context);
-                sendJson(exchange, Map.of("success", true, "output", context.getMultiLineOutput()));
-            } catch (Exception e) {
-                sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
+            String method = exchange.getRequestMethod();
+            if ("GET".equals(method)) {
+                // List available commands
+                List<String> commands = new ArrayList<>();
+                for (var cmd : COMMAND.getCommands()) {
+                    commands.add(cmd.commandUsage().getName());
+                }
+                sendJson(exchange, commands);
+            } else if ("POST".equals(method)) {
+                try {
+                    String body = new String(exchange.getRequestBody().readAllBytes());
+                    String command = body.replaceAll(".*\"command\"\\s*:\\s*\"", "").replaceAll("\".*", "");
+                    CommandContext context = CommandContext.create(command, CommandSources.TERMINAL);
+                    COMMAND.execute(context);
+                    sendJson(exchange, Map.of("success", true, "output", context.getMultiLineOutput()));
+                } catch (Exception e) {
+                    sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
+                }
+            } else {
+                sendJson(exchange, Map.of("error", "Method not allowed"));
             }
         }
     }
