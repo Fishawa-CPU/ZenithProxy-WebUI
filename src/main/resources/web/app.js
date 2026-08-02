@@ -9,22 +9,24 @@ let historyIndex = -1;
 let wsPort = 8081;
 const API_BASE = window.location.origin + '/api';
 
-// Autocomplete state
+// Autocomplete
 let autocompleteIndex = -1;
 let autocompleteSuggestions = [];
 
-// Chart instances
+// Charts
 let cpuChart = null;
 let memoryChart = null;
 let networkChart = null;
 let latencyChart = null;
 const MAX_DATA_POINTS = 60;
+const MAX_TERMINAL_LINES = 500;
 
-// Terminal state
+// Terminal
 let terminalScrollLocked = true;
 let terminalBusy = false;
+let currentPage = 'dashboard';
 
-// ZenithProxy real commands (from CommandManager)
+// ZenithProxy real commands
 const KNOWN_COMMANDS = [
     'help', 'connect', 'disconnect', 'reconnect', 'cancel',
     'auth', 'whitelist', 'friend', 'ignore', 'kick',
@@ -55,31 +57,17 @@ const KNOWN_COMMANDS = [
     'license',
 ];
 
-// Initialize
+let serverCommands = KNOWN_COMMANDS;
+
+// ── Init ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initWebSocket();
     initTerminal();
     initConfigTabs();
-    initCharts();
     loadDashboard();
     loadCommands();
-    startSystemPolling();
 });
-
-// Fetch real commands from server
-let serverCommands = KNOWN_COMMANDS;
-async function loadCommands() {
-    try {
-        const response = await fetch(API_BASE + '/commands');
-        const data = await response.json();
-        if (Array.isArray(data) && data.length > 0) {
-            serverCommands = data.sort();
-        }
-    } catch (e) {
-        console.log('Using default command list');
-    }
-}
 
 // ── Navigation ────────────────────────────────
 function initNavigation() {
@@ -89,87 +77,79 @@ function initNavigation() {
 }
 
 function navigateTo(page) {
+    currentPage = page;
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.page === page);
     });
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(page).classList.add('active');
 
-    switch(page) {
-        case 'dashboard': loadDashboard(); break;
+    switch (page) {
+        case 'dashboard': loadDashboard(); initCharts(); startSystemPolling(); break;
         case 'modules': loadModules(); break;
         case 'config': loadConfig(); break;
         case 'players': loadPlayers(); break;
     }
+
+    // Stop polling when leaving dashboard
+    if (page !== 'dashboard') stopSystemPolling();
 }
 
 // ── API ───────────────────────────────────────
 async function apiCall(endpoint, method = 'GET', body = null) {
     try {
-        const options = {
-            method,
-            headers: { 'Content-Type': 'application/json' }
-        };
-        if (body) options.body = JSON.stringify(body);
-        const response = await fetch(API_BASE + endpoint, options);
-        return await response.json();
-    } catch (error) {
-        console.error('API call failed:', error);
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const r = await fetch(API_BASE + endpoint, opts);
+        return await r.json();
+    } catch (e) {
+        console.error('API error:', e);
         return null;
     }
 }
 
 // ── Dashboard ─────────────────────────────────
 async function loadDashboard() {
-    const status = await apiCall('/status');
-    if (!status) return;
-
-    if (status.websocketPort) wsPort = status.websocketPort;
-    document.getElementById('proxyStatus').textContent = status.connected ? '已连接' : '未连接';
-    document.getElementById('proxyStatus').style.color = status.connected ? 'var(--success-color)' : 'var(--error-color)';
-    document.getElementById('currentUsername').textContent = status.username || '-';
-    document.getElementById('proxyAddress').textContent = status.proxyAddress || '-';
-    document.getElementById('mcVersion').textContent = status.version || '-';
-
-    if (status.uptime) {
-        const h = Math.floor(status.uptime / 3600000);
-        const m = Math.floor((status.uptime % 3600000) / 60000);
-        const s = Math.floor((status.uptime % 60000) / 1000);
-        document.getElementById('uptime').textContent = `${h}时 ${m}分 ${s}秒`;
+    const s = await apiCall('/status');
+    if (!s) return;
+    if (s.websocketPort) wsPort = s.websocketPort;
+    document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
+    document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
+    document.getElementById('currentUsername').textContent = s.username || '-';
+    document.getElementById('proxyAddress').textContent = s.proxyAddress || '-';
+    document.getElementById('mcVersion').textContent = s.version || '-';
+    if (s.uptime) {
+        const h = Math.floor(s.uptime / 3600000);
+        const m = Math.floor((s.uptime % 3600000) / 60000);
+        const sec = Math.floor((s.uptime % 60000) / 1000);
+        document.getElementById('uptime').textContent = `${h}时 ${m}分 ${sec}秒`;
     }
-
-    if (status.inQueue) {
-        document.getElementById('queueStatus').textContent = `队列位置: ${status.queuePosition}`;
+    if (s.inQueue) {
+        document.getElementById('queueStatus').textContent = `队列位置: ${s.queuePosition}`;
         document.getElementById('queueStatus').style.color = 'var(--warning-color)';
     } else {
         document.getElementById('queueStatus').textContent = '不在队列中';
         document.getElementById('queueStatus').style.color = 'var(--success-color)';
     }
-
-    document.getElementById('version').textContent = 'v' + status.version;
+    document.getElementById('version').textContent = 'v' + s.version;
 }
 
 function refreshDashboard() { loadDashboard(); }
 
 // ── System Charts ─────────────────────────────
 const chartColors = {
-    cpu: 'rgba(198, 160, 246, 1)',       // mauve
-    cpuBg: 'rgba(198, 160, 246, 0.15)',
-    memory: 'rgba(166, 218, 149, 1)',     // green
-    memoryBg: 'rgba(166, 218, 149, 0.15)',
-    netIn: 'rgba(138, 173, 244, 1)',      // blue
-    netInBg: 'rgba(138, 173, 244, 0.15)',
-    netOut: 'rgba(245, 169, 127, 1)',     // peach
-    netOutBg: 'rgba(245, 169, 127, 0.15)',
-    grid: 'rgba(110, 115, 141, 0.15)',
-    text: '#8087a2',
+    cpu: 'rgba(198, 160, 246, 1)', cpuBg: 'rgba(198, 160, 246, 0.15)',
+    memory: 'rgba(166, 218, 149, 1)', memoryBg: 'rgba(166, 218, 149, 0.15)',
+    netIn: 'rgba(138, 173, 244, 1)', netInBg: 'rgba(138, 173, 244, 0.15)',
+    netOut: 'rgba(245, 169, 127, 1)', netOutBg: 'rgba(245, 169, 127, 0.15)',
+    grid: 'rgba(110, 115, 141, 0.15)', text: '#8087a2',
 };
 
 function makeTimeLabels(count) {
     const labels = [];
     const now = new Date();
     for (let i = count - 1; i >= 0; i--) {
-        const t = new Date(now - i * 3000);
+        const t = new Date(now - i * 5000);
         labels.push(t.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     }
     return labels;
@@ -177,20 +157,15 @@ function makeTimeLabels(count) {
 
 function makeChartOptions(unit, suggestedMax) {
     return {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 300 },
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: 0 },
         interaction: { intersect: false, mode: 'index' },
         plugins: {
             legend: { display: false },
             tooltip: {
-                backgroundColor: 'rgba(30, 32, 48, 0.95)',
-                titleColor: '#cad3f5',
-                bodyColor: '#b8c0e0',
-                borderColor: 'rgba(91, 96, 120, 0.5)',
-                borderWidth: 1,
-                padding: 8,
-                displayColors: true,
+                backgroundColor: 'rgba(30, 32, 48, 0.95)', titleColor: '#cad3f5',
+                bodyColor: '#b8c0e0', borderColor: 'rgba(91, 96, 120, 0.5)',
+                borderWidth: 1, padding: 8, displayColors: true,
             }
         },
         scales: {
@@ -200,64 +175,38 @@ function makeChartOptions(unit, suggestedMax) {
                 ticks: { color: chartColors.text, font: { size: 10 }, maxTicksLimit: 6 },
             },
             y: {
-                display: true,
-                min: 0,
-                suggestedMax: suggestedMax,
+                display: true, min: 0, suggestedMax: suggestedMax,
                 grid: { color: chartColors.grid, drawBorder: false },
-                ticks: {
-                    color: chartColors.text,
-                    font: { size: 10 },
-                    maxTicksLimit: 5,
-                    callback: v => v + (unit || ''),
-                },
+                ticks: { color: chartColors.text, font: { size: 10 }, maxTicksLimit: 5, callback: v => v + (unit || '') },
             }
         }
     };
 }
 
 function createLineDataset(label, color, bgColor) {
-    return {
-        label,
-        data: [],
-        borderColor: color,
-        backgroundColor: bgColor,
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: true,
-        tension: 0.3,
-    };
+    return { label, data: [], borderColor: color, backgroundColor: bgColor, borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 };
 }
 
+let chartsInitialized = false;
+
 function initCharts() {
+    if (chartsInitialized) return;
+    chartsInitialized = true;
     const timeLabels = makeTimeLabels(MAX_DATA_POINTS);
 
     cpuChart = new Chart(document.getElementById('cpuChart'), {
-        type: 'line',
-        data: {
-            labels: timeLabels,
-            datasets: [createLineDataset('CPU', chartColors.cpu, chartColors.cpuBg)],
-        },
+        type: 'line', data: { labels: timeLabels, datasets: [createLineDataset('CPU', chartColors.cpu, chartColors.cpuBg)] },
         options: makeChartOptions('%', 100),
     });
-
     memoryChart = new Chart(document.getElementById('memoryChart'), {
-        type: 'line',
-        data: {
-            labels: timeLabels,
-            datasets: [createLineDataset('Memory', chartColors.memory, chartColors.memoryBg)],
-        },
+        type: 'line', data: { labels: timeLabels, datasets: [createLineDataset('Memory', chartColors.memory, chartColors.memoryBg)] },
         options: makeChartOptions('%', 100),
     });
-
     networkChart = new Chart(document.getElementById('networkChart'), {
-        type: 'line',
-        data: {
-            labels: timeLabels,
-            datasets: [
-                createLineDataset('↓ 入站 In', chartColors.netIn, chartColors.netInBg),
-                createLineDataset('↑ 出站 Out', chartColors.netOut, chartColors.netOutBg),
-            ],
-        },
+        type: 'line', data: { labels: timeLabels, datasets: [
+            createLineDataset('In', chartColors.netIn, chartColors.netInBg),
+            createLineDataset('Out', chartColors.netOut, chartColors.netOutBg),
+        ]},
         options: {
             ...makeChartOptions('', undefined),
             plugins: {
@@ -266,13 +215,8 @@ function initCharts() {
             }
         },
     });
-
     latencyChart = new Chart(document.getElementById('latencyChart'), {
-        type: 'line',
-        data: {
-            labels: timeLabels,
-            datasets: [createLineDataset('Ping', 'rgba(238, 212, 159, 1)', 'rgba(238, 212, 159, 0.15)')],
-        },
+        type: 'line', data: { labels: timeLabels, datasets: [createLineDataset('Ping', 'rgba(238, 212, 159, 1)', 'rgba(238, 212, 159, 0.15)')] },
         options: makeChartOptions('ms', 200),
     });
 }
@@ -280,41 +224,40 @@ function initCharts() {
 let systemPollTimer = null;
 
 function startSystemPolling() {
-    if (systemPollTimer) clearInterval(systemPollTimer);
+    if (systemPollTimer) return; // already running
     fetchSystemStats();
-    systemPollTimer = setInterval(fetchSystemStats, 3000);
+    systemPollTimer = setInterval(fetchSystemStats, 5000);
+}
+
+function stopSystemPolling() {
+    if (systemPollTimer) { clearInterval(systemPollTimer); systemPollTimer = null; }
 }
 
 async function fetchSystemStats() {
-    const data = await apiCall('/system');
-    if (!data) return;
+    if (currentPage !== 'dashboard') { stopSystemPolling(); return; }
+
+    const [sysData, latData] = await Promise.all([
+        apiCall('/system'),
+        apiCall('/latency'),
+    ]);
 
     const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    // CPU
-    if (cpuChart) {
-        const ds = cpuChart.data.datasets[0];
-        ds.data.push(Math.max(0, data.cpuLoad || 0));
+    if (sysData && cpuChart) {
+        cpuChart.data.datasets[0].data.push(Math.max(0, sysData.cpuLoad || 0));
         cpuChart.data.labels.push(now);
-        if (ds.data.length > MAX_DATA_POINTS) { ds.data.shift(); cpuChart.data.labels.shift(); }
+        if (cpuChart.data.datasets[0].data.length > MAX_DATA_POINTS) { cpuChart.data.datasets[0].data.shift(); cpuChart.data.labels.shift(); }
         cpuChart.update('none');
     }
-
-    // Memory
-    if (memoryChart) {
-        const ds = memoryChart.data.datasets[0];
-        ds.data.push(data.memoryPercent || 0);
+    if (sysData && memoryChart) {
+        memoryChart.data.datasets[0].data.push(sysData.memoryPercent || 0);
         memoryChart.data.labels.push(now);
-        if (ds.data.length > MAX_DATA_POINTS) { ds.data.shift(); memoryChart.data.labels.shift(); }
+        if (memoryChart.data.datasets[0].data.length > MAX_DATA_POINTS) { memoryChart.data.datasets[0].data.shift(); memoryChart.data.labels.shift(); }
         memoryChart.update('none');
     }
-
-    // Network (convert to KB/s for display)
-    if (networkChart) {
-        const kbIn = Math.round((data.netBytesPerSecIn || 0) / 1024 * 10) / 10;
-        const kbOut = Math.round((data.netBytesPerSecOut || 0) / 1024 * 10) / 10;
-        networkChart.data.datasets[0].data.push(kbIn);
-        networkChart.data.datasets[1].data.push(kbOut);
+    if (sysData && networkChart) {
+        networkChart.data.datasets[0].data.push(Math.round((sysData.netBytesPerSecIn || 0) / 1024 * 10) / 10);
+        networkChart.data.datasets[1].data.push(Math.round((sysData.netBytesPerSecOut || 0) / 1024 * 10) / 10);
         networkChart.data.labels.push(now);
         if (networkChart.data.datasets[0].data.length > MAX_DATA_POINTS) {
             networkChart.data.datasets[0].data.shift();
@@ -323,20 +266,12 @@ async function fetchSystemStats() {
         }
         networkChart.update('none');
     }
-
-    // Latency
-    fetchLatency();
-}
-
-async function fetchLatency() {
-    const data = await apiCall('/latency');
-    if (!data || !latencyChart) return;
-    const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const ds = latencyChart.data.datasets[0];
-    ds.data.push(data.connected ? data.latency : 0);
-    latencyChart.data.labels.push(now);
-    if (ds.data.length > MAX_DATA_POINTS) { ds.data.shift(); latencyChart.data.labels.shift(); }
-    latencyChart.update('none');
+    if (latData && latencyChart) {
+        latencyChart.data.datasets[0].data.push(latData.connected ? latData.latency : 0);
+        latencyChart.data.labels.push(now);
+        if (latencyChart.data.datasets[0].data.length > MAX_DATA_POINTS) { latencyChart.data.datasets[0].data.shift(); latencyChart.data.labels.shift(); }
+        latencyChart.update('none');
+    }
 }
 
 // ── Modules ───────────────────────────────────
@@ -456,30 +391,28 @@ async function saveConfig() {
         },
         client: {
             autoConnect: document.getElementById('autoConnect')?.checked,
-            server: {
-                address: document.getElementById('targetServer')?.value,
-                port: parseInt(document.getElementById('targetPort')?.value) || 25565
-            }
+            server: { address: document.getElementById('targetServer')?.value, port: parseInt(document.getElementById('targetPort')?.value) || 25565 }
         },
         server: {
-            bind: {
-                address: document.getElementById('bindAddress')?.value,
-                port: parseInt(document.getElementById('bindPort')?.value) || 25565
-            },
+            bind: { address: document.getElementById('bindAddress')?.value, port: parseInt(document.getElementById('bindPort')?.value) || 25565 },
             enabled: document.getElementById('serverEnabled')?.checked
         }
     };
-    const result = await apiCall('/config', 'POST', config);
-    if (result?.success) {
-        showNotification('配置已保存 / Config saved', 'success');
-    } else {
-        showNotification('保存失败 / Save failed: ' + (result?.error || '未知错误'), 'error');
-    }
+    const r = await apiCall('/config', 'POST', config);
+    if (r?.success) showNotification('配置已保存 / Config saved', 'success');
+    else showNotification('保存失败 / Save failed: ' + (r?.error || '未知错误'), 'error');
 }
 
-// ── Terminal + Logs (Unified) ─────────────────
-let terminalScrollLocked = true;
+// ── Fetch commands from server ────────────────
+async function loadCommands() {
+    try {
+        const r = await fetch(API_BASE + '/commands');
+        const data = await r.json();
+        if (Array.isArray(data) && data.length > 0) serverCommands = data.sort();
+    } catch (e) { /* use defaults */ }
+}
 
+// ── Terminal ──────────────────────────────────
 function initTerminal() {
     const input = document.getElementById('terminalInput');
     const dropdown = document.getElementById('autocompleteDropdown');
@@ -487,36 +420,19 @@ function initTerminal() {
 
     output.tabIndex = 0;
 
-    // Mouse wheel scroll in terminal output
-    output.addEventListener('wheel', (e) => {
-        // Allow native scroll, just update lock state
+    output.addEventListener('wheel', () => {
         setTimeout(() => {
-            const atBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
-            terminalScrollLocked = atBottom;
+            terminalScrollLocked = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
         }, 0);
     }, { passive: true });
 
-    // PageUp/PageDown
     output.addEventListener('keydown', (e) => {
-        if (e.key === 'PageUp') {
-            e.preventDefault();
-            output.scrollTop -= output.clientHeight - 40;
-            terminalScrollLocked = false;
-        } else if (e.key === 'PageDown') {
-            e.preventDefault();
-            output.scrollTop += output.clientHeight - 40;
-            if (output.scrollHeight - output.scrollTop - output.clientHeight < 60) {
-                terminalScrollLocked = true;
-            }
-        } else if (e.key === 'End') {
-            e.preventDefault();
-            output.scrollTop = output.scrollHeight;
-            terminalScrollLocked = true;
-        }
+        if (e.key === 'PageUp') { e.preventDefault(); output.scrollTop -= output.clientHeight - 40; terminalScrollLocked = false; }
+        else if (e.key === 'PageDown') { e.preventDefault(); output.scrollTop += output.clientHeight - 40; if (output.scrollHeight - output.scrollTop - output.clientHeight < 60) terminalScrollLocked = true; }
+        else if (e.key === 'End') { e.preventDefault(); output.scrollTop = output.scrollHeight; terminalScrollLocked = true; }
     });
 
     input.addEventListener('keydown', (e) => {
-        // Autocomplete navigation
         if (dropdown.classList.contains('visible')) {
             if (e.key === 'ArrowDown') { e.preventDefault(); navigateAutocomplete(1); return; }
             if (e.key === 'ArrowUp') { e.preventDefault(); navigateAutocomplete(-1); return; }
@@ -527,62 +443,66 @@ function initTerminal() {
 
         if (e.key === 'Enter') {
             e.preventDefault();
-            executeCommand(input.value);
+            const cmd = input.value;
             input.value = '';
             hideAutocomplete();
+            sendTerminalCommand(cmd);
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            if (historyIndex < commandHistory.length - 1) {
-                historyIndex++;
-                input.value = commandHistory[commandHistory.length - 1 - historyIndex];
-                setTimeout(() => input.setSelectionRange(input.value.length, input.value.length), 0);
-            }
+            if (historyIndex < commandHistory.length - 1) { historyIndex++; input.value = commandHistory[commandHistory.length - 1 - historyIndex]; }
         } else if (e.key === 'ArrowDown') {
             e.preventDefault();
-            if (historyIndex > 0) {
-                historyIndex--;
-                input.value = commandHistory[commandHistory.length - 1 - historyIndex];
-                setTimeout(() => input.setSelectionRange(input.value.length, input.value.length), 0);
-            } else {
-                historyIndex = -1;
-                input.value = '';
-            }
+            if (historyIndex > 0) { historyIndex--; input.value = commandHistory[commandHistory.length - 1 - historyIndex]; }
+            else { historyIndex = -1; input.value = ''; }
         } else if (e.key === 'Tab') {
             e.preventDefault();
             showAutocomplete(input.value);
         }
     });
 
-    input.addEventListener('input', () => hideAutocomplete());
-
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('.terminal-input-wrapper') && !e.target.closest('.modal')) {
-            hideAutocomplete();
-        }
-    });
+    input.addEventListener('input', hideAutocomplete);
+    document.addEventListener('click', (e) => { if (!e.target.closest('.terminal-input-wrapper')) hideAutocomplete(); });
 }
 
+function sendTerminalCommand(command) {
+    if (!command.trim()) return;
+    if (terminalBusy) {
+        appendTerminalLine('前一个命令还在执行中... / Previous command still running...', 'terminal-line-warn');
+        return;
+    }
+    commandHistory.push(command);
+    historyIndex = -1;
+    terminalBusy = true;
+
+    // Auto-reset busy after 10s timeout
+    setTimeout(() => { if (terminalBusy) { terminalBusy = false; appendTerminalLine('命令超时 / Command timed out', 'terminal-line-warn'); } }, 10000);
+
+    appendTerminalLine(`root@zenith $ ${command}`, 'terminal-line-command');
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'command', data: command }));
+    } else {
+        appendTerminalLine('WebSocket 未连接 / Not connected', 'terminal-line-error');
+        terminalBusy = false;
+    }
+}
+
+// ── Autocomplete ──────────────────────────────
 function showAutocomplete(value) {
     const dropdown = document.getElementById('autocompleteDropdown');
     const query = value.trim().toLowerCase();
-    autocompleteSuggestions = !query
-        ? [...serverCommands]
-        : serverCommands.filter(cmd => cmd.toLowerCase().includes(query));
-
+    autocompleteSuggestions = !query ? [...serverCommands] : serverCommands.filter(c => c.toLowerCase().includes(query));
     if (autocompleteSuggestions.length === 0) { hideAutocomplete(); return; }
-
     autocompleteIndex = -1;
-    dropdown.innerHTML = autocompleteSuggestions.map((cmd, i) =>
-        `<div class="autocomplete-item" data-index="${i}" onmousedown="selectAutocompleteAt(${i})">${cmd}</div>`
-    ).join('');
+    dropdown.innerHTML = autocompleteSuggestions.map((c, i) => `<div class="autocomplete-item" onmousedown="selectAutocompleteAt(${i})">${c}</div>`).join('');
     dropdown.classList.add('visible');
 }
 
-function navigateAutocomplete(direction) {
+function navigateAutocomplete(dir) {
     const items = document.querySelectorAll('.autocomplete-item');
-    if (items.length === 0) return;
+    if (!items.length) return;
     if (autocompleteIndex >= 0) items[autocompleteIndex].classList.remove('selected');
-    autocompleteIndex += direction;
+    autocompleteIndex += dir;
     if (autocompleteIndex < 0) autocompleteIndex = items.length - 1;
     if (autocompleteIndex >= items.length) autocompleteIndex = 0;
     items[autocompleteIndex].classList.add('selected');
@@ -596,8 +516,8 @@ function selectAutocomplete() {
     hideAutocomplete();
 }
 
-function selectAutocompleteAt(index) {
-    document.getElementById('terminalInput').value = autocompleteSuggestions[index] + ' ';
+function selectAutocompleteAt(i) {
+    document.getElementById('terminalInput').value = autocompleteSuggestions[i] + ' ';
     hideAutocomplete();
     document.getElementById('terminalInput').focus();
 }
@@ -609,79 +529,45 @@ function hideAutocomplete() {
     d.innerHTML = '';
 }
 
-async function executeCommand(command) {
-    // This is now handled by sendTerminalCommand via WebSocket
-    sendTerminalCommand(command);
-}
-
-function sendTerminalCommand(command) {
-    if (!command.trim()) return;
-    if (terminalBusy) {
-        appendTerminalLine('命令正在执行中... / Command still running...', 'terminal-line-warn');
-        return;
-    }
-    commandHistory.push(command);
-    historyIndex = -1;
-    terminalBusy = true;
-
-    // Show command with prompt
-    appendTerminalLine(`root@zenith $ ${command}`, 'terminal-line-command');
-
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'command', data: command }));
-    } else {
-        appendTerminalLine('WebSocket 未连接 / Not connected', 'terminal-line-error');
-        terminalBusy = false;
-    }
-}
-
-// ── Logs (streamed into terminal output) ──────
+// ── Terminal output ───────────────────────────
 function addLogEntry(log) {
     logs.push(log);
-
     const output = document.getElementById('terminalOutput');
+    if (!output) return;
+
     const entry = document.createElement('div');
     entry.className = 'terminal-line terminal-line-log';
     entry.dataset.level = log.level;
-
     const ts = new Date(log.timestamp).toLocaleTimeString();
     entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${log.level.toLowerCase()}">${log.level}</span><span class="log-msg">[${log.logger}] ${log.message}</span>`;
 
     output.appendChild(entry);
 
-    // Apply current filter
     const levelFilter = document.getElementById('logLevel')?.value || 'all';
-    if (levelFilter !== 'all' && log.level !== levelFilter) {
-        entry.style.display = 'none';
-    }
+    if (levelFilter !== 'all' && log.level !== levelFilter) entry.style.display = 'none';
 
-    // Auto-scroll only if at bottom
-    if (terminalScrollLocked) {
-        output.scrollTop = output.scrollHeight;
-    }
+    if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
 
-    // Cap entries
-    if (output.children.length > 2000) {
-        output.removeChild(output.firstChild);
-    }
+    // Aggressive cap
+    while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);
 }
 
 function filterLogs() {
-    const levelFilter = document.getElementById('logLevel').value;
-    document.querySelectorAll('.terminal-line-log').forEach(entry => {
-        entry.style.display = (levelFilter === 'all' || entry.dataset.level === levelFilter) ? '' : 'none';
+    const f = document.getElementById('logLevel').value;
+    document.querySelectorAll('.terminal-line-log').forEach(e => {
+        e.style.display = (f === 'all' || e.dataset.level === f) ? '' : 'none';
     });
 }
 
 function appendTerminalLine(text, className) {
     const output = document.getElementById('terminalOutput');
+    if (!output) return;
     const line = document.createElement('div');
     line.className = `terminal-line ${className}`;
     line.textContent = text;
     output.appendChild(line);
-    if (terminalScrollLocked) {
-        output.scrollTop = output.scrollHeight;
-    }
+    if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
+    while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);
 }
 
 function clearTerminal() {
@@ -695,94 +581,69 @@ function clearTerminal() {
     logs = [];
 }
 
-// ── Export terminal content ────────────────────
 function exportTerminalContent() {
     const output = document.getElementById('terminalOutput');
     const lines = [];
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-    lines.push('='.repeat(60));
-    lines.push(`ZenithProxy Terminal Export — ${now}`);
-    lines.push('='.repeat(60));
-    lines.push('');
-
-    for (const el of output.children) {
-        if (el.style.display === 'none') continue;
-        lines.push(el.textContent);
-    }
-
+    lines.push('='.repeat(60), `ZenithProxy Terminal Export — ${now}`, '='.repeat(60), '');
+    for (const el of output.children) { if (el.style.display !== 'none') lines.push(el.textContent); }
     if (commandHistory.length > 0) {
-        lines.push('');
-        lines.push('-'.repeat(60));
-        lines.push('Command History 命令历史');
-        lines.push('-'.repeat(60));
-        commandHistory.forEach((cmd, i) => lines.push(`  [${i + 1}] ${cmd}`));
+        lines.push('', '-'.repeat(60), 'Command History', '-'.repeat(60));
+        commandHistory.forEach((c, i) => lines.push(`  [${i + 1}] ${c}`));
     }
-
-    lines.push('');
-    lines.push('='.repeat(60));
-    lines.push('End of export');
-
+    lines.push('', '='.repeat(60), 'End of export');
     const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = `zenithproxy-terminal-${new Date().toISOString().split('T')[0]}.txt`;
     a.click();
-    URL.revokeObjectURL(url);
     showNotification('终端日志已导出 / Terminal exported', 'success');
 }
 
 // ── WebSocket ─────────────────────────────────
 function initWebSocket() {
+    // Close old connection first
+    if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} ws = null; }
+
     try {
         ws = new WebSocket(`ws://${window.location.hostname}:${wsPort}`);
 
         ws.onopen = () => {
             updateConnectionStatus(true);
-            appendTerminalLine('已连接到 ZenithProxy 终端 / Connected to ZenithProxy Terminal', 'terminal-line-success');
+            appendTerminalLine('已连接到 ZenithProxy Terminal', 'terminal-line-success');
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            switch (data.type) {
-                case 'welcome':
-                    wsClientId = data.data?.clientId;
-                    break;
-                case 'log':
-                    addLogEntry(data.data);
-                    break;
-                case 'terminal':
-                    // Skip - we already echo commands in sendTerminalCommand
-                    break;
-                case 'command_result':
-                    terminalBusy = false;
-                    const result = data.data;
-                    if (result.success) {
-                        if (result.output && Array.isArray(result.output)) {
-                            result.output.forEach(line => appendTerminalLine(line, 'terminal-line-output'));
-                        } else if (result.message) {
-                            appendTerminalLine(result.message, 'terminal-line-success');
+            try {
+                const data = JSON.parse(event.data);
+                switch (data.type) {
+                    case 'welcome': wsClientId = data.data?.clientId; break;
+                    case 'log': addLogEntry(data.data); break;
+                    case 'terminal': break; // echoed client-side
+                    case 'command_result':
+                        terminalBusy = false;
+                        const r = data.data;
+                        if (r.success) {
+                            if (r.output && Array.isArray(r.output)) r.output.forEach(l => appendTerminalLine(l, 'terminal-line-output'));
+                            else if (r.message) appendTerminalLine(r.message, 'terminal-line-success');
+                        } else {
+                            appendTerminalLine('Error: ' + (r.error || 'Unknown'), 'terminal-line-error');
                         }
-                        // Don't show "OK" for empty success - just mark as done
-                    } else {
-                        appendTerminalLine('Error: ' + (result.error || 'Unknown error'), 'terminal-line-error');
-                    }
-                    break;
-                case 'status':
-                    updateDashboardStatus(data.data);
-                    break;
-            }
+                        break;
+                    case 'status': updateDashboardStatus(data.data); break;
+                }
+            } catch (e) { console.error('WS parse error:', e); }
         };
 
         ws.onclose = () => {
             updateConnectionStatus(false);
-            setTimeout(initWebSocket, 3000);
+            setTimeout(initWebSocket, 5000);
         };
 
-        ws.onerror = (error) => console.error('WebSocket error:', error);
-    } catch (error) {
-        console.error('WebSocket initialization failed:', error);
+        ws.onerror = () => {};
+    } catch (e) {
+        console.error('WS init failed:', e);
+        setTimeout(initWebSocket, 5000);
     }
 }
 
@@ -795,6 +656,19 @@ function updateConnectionStatus(connected) {
     } else {
         dot.className = 'status-dot disconnected';
         text.innerHTML = '未连接 <span class="en" style="font-size:0.7rem;color:var(--ctp-overlay0);">Disconnected</span>';
+    }
+}
+
+function updateDashboardStatus(s) {
+    if (!s) return;
+    document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
+    document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
+    if (s.inQueue) {
+        document.getElementById('queueStatus').textContent = `队列位置: ${s.queuePosition}`;
+        document.getElementById('queueStatus').style.color = 'var(--warning-color)';
+    } else {
+        document.getElementById('queueStatus').textContent = '不在队列中';
+        document.getElementById('queueStatus').style.color = 'var(--success-color)';
     }
 }
 
@@ -820,31 +694,13 @@ async function loadPlayers() {
 function refreshPlayers() { loadPlayers(); }
 
 // ── Utility ───────────────────────────────────
-function sendCommand(cmd) { executeCommand(cmd); }
-
-function updateDashboardStatus(status) {
-    if (!status) return;
-    document.getElementById('proxyStatus').textContent = status.connected ? '已连接' : '未连接';
-    document.getElementById('proxyStatus').style.color = status.connected ? 'var(--success-color)' : 'var(--error-color)';
-    if (status.inQueue) {
-        document.getElementById('queueStatus').textContent = `队列位置: ${status.queuePosition}`;
-        document.getElementById('queueStatus').style.color = 'var(--warning-color)';
-    } else {
-        document.getElementById('queueStatus').textContent = '不在队列中';
-        document.getElementById('queueStatus').style.color = 'var(--success-color)';
-    }
-}
+function sendCommand(cmd) { sendTerminalCommand(cmd); }
 
 function showNotification(message, type = 'info') {
     const n = document.createElement('div');
     n.className = `notification ${type}`;
     n.textContent = message;
-    n.style.cssText = `
-        position:fixed;top:16px;right:16px;padding:12px 20px;
-        border-radius:4px;color:var(--ctp-crust);font-weight:500;
-        font-size:0.85rem;z-index:1000;opacity:0;transform:translateY(-8px);
-        transition:opacity 0.2s ease,transform 0.2s ease;
-    `;
+    n.style.cssText = 'position:fixed;top:16px;right:16px;padding:12px 20px;border-radius:4px;color:var(--ctp-crust);font-weight:500;font-size:0.85rem;z-index:1000;opacity:0;transform:translateY(-8px);transition:opacity 0.2s ease,transform 0.2s ease;';
     switch (type) {
         case 'success': n.style.backgroundColor = 'var(--success-color)'; break;
         case 'error': n.style.backgroundColor = 'var(--error-color)'; break;
@@ -853,9 +709,5 @@ function showNotification(message, type = 'info') {
     }
     document.body.appendChild(n);
     requestAnimationFrame(() => { n.style.opacity = '1'; n.style.transform = 'translateY(0)'; });
-    setTimeout(() => {
-        n.style.opacity = '0';
-        n.style.transform = 'translateY(-8px)';
-        setTimeout(() => n.remove(), 200);
-    }, 3000);
+    setTimeout(() => { n.style.opacity = '0'; n.style.transform = 'translateY(-8px)'; setTimeout(() => n.remove(), 200); }, 3000);
 }
