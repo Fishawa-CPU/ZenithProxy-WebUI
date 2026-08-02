@@ -225,7 +225,28 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     String command = body.replaceAll(".*\"command\"\\s*:\\s*\"", "").replaceAll("\".*", "");
                     CommandContext context = CommandContext.create(command, CommandSources.TERMINAL);
                     COMMAND.execute(context);
-                    sendJson(exchange, Map.of("success", true, "output", context.getMultiLineOutput()));
+
+                    // Extract output from embed (commands write to embed, not multiLineOutput)
+                    List<String> output = new ArrayList<>();
+                    var embed = context.getEmbed();
+                    if (embed != null) {
+                        if (embed.title() != null) output.add(embed.title());
+                        if (embed.description() != null) output.add(embed.description());
+                        var fields = embed.fields();
+                        if (fields != null) {
+                            for (var field : fields) {
+                                String name = field.name();
+                                String value = field.value();
+                                if (name != null && !name.isEmpty()) output.add(name + ": " + value);
+                                else if (value != null) output.add(value);
+                            }
+                        }
+                    }
+                    // Also check multiLineOutput
+                    var ml = context.getMultiLineOutput();
+                    if (ml != null && !ml.isEmpty()) output.addAll(ml);
+
+                    sendJson(exchange, Map.of("success", true, "output", output));
                 } catch (Exception e) {
                     sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
                 }
