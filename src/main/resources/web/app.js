@@ -60,13 +60,21 @@ const KNOWN_COMMANDS = [
 let serverCommands = KNOWN_COMMANDS;
 
 // ── Init ──────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
-    initWebSocket();
     initTerminal();
     initConfigTabs();
+
+    // Fetch status first to get correct wsPort, then connect WebSocket
+    const s = await apiCall('/status');
+    if (s) {
+        if (s.websocketPort) wsPort = s.websocketPort;
+        // Update dashboard fields while we have the data
+        currentPage = 'dashboard';
+    }
     loadDashboard();
     loadCommands();
+    initWebSocket();
 });
 
 // ── Navigation ────────────────────────────────
@@ -542,21 +550,8 @@ function addLogEntry(log) {
     entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${log.level.toLowerCase()}">${log.level}</span><span class="log-msg">[${log.logger}] ${log.message}</span>`;
 
     output.appendChild(entry);
-
-    const levelFilter = document.getElementById('logLevel')?.value || 'all';
-    if (levelFilter !== 'all' && log.level !== levelFilter) entry.style.display = 'none';
-
     if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
-
-    // Aggressive cap
     while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);
-}
-
-function filterLogs() {
-    const f = document.getElementById('logLevel').value;
-    document.querySelectorAll('.terminal-line-log').forEach(e => {
-        e.style.display = (f === 'all' || e.dataset.level === f) ? '' : 'none';
-    });
 }
 
 function appendTerminalLine(text, className) {
