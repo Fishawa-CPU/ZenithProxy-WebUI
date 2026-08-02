@@ -28,18 +28,56 @@ import static com.mojang.brigadier.builder.LiteralArgumentBuilder.literal;
 
 public class WebUIPlugin implements ZenithProxyPlugin {
     private static final ComponentLogger LOG = ComponentLogger.logger("WebUI");
+    private static final Path CONFIG_FILE = Path.of("config.json");
+    private static int httpPort = 8080;
+    private static int wsPort = 8081;
     private HttpServer httpServer;
     private WebSocketServer webSocketServer;
     private PluginAPI api;
-    private int httpPort = 8080;
-    private int wsPort = 8081;
 
     @Override
     public void onLoad(PluginAPI pluginAPI) {
         this.api = pluginAPI;
+        loadOrCreateConfig();
         pluginAPI.registerCommand(new WebUICommand());
         start();
         LOG.info("WebUI plugin loaded! Access at http://localhost:{}", httpPort);
+    }
+
+    private void loadOrCreateConfig() {
+        try {
+            if (Files.exists(CONFIG_FILE)) {
+                String content = Files.readString(CONFIG_FILE);
+                com.google.gson.JsonObject root = GSON.fromJson(content, com.google.gson.JsonObject.class);
+                if (root != null && root.has("webUI")) {
+                    com.google.gson.JsonObject webUI = root.getAsJsonObject("webUI");
+                    if (webUI.has("port")) httpPort = webUI.get("port").getAsInt();
+                    if (webUI.has("websocketPort")) wsPort = webUI.get("websocketPort").getAsInt();
+                    LOG.info("Loaded WebUI config: http={}, ws={}", httpPort, wsPort);
+                    return;
+                }
+                // config.json exists but no webUI section — add it
+                root.add("webUI", defaultWebUIConfig());
+                Files.writeString(CONFIG_FILE, GSON.toJson(root));
+                LOG.info("Added default webUI config to existing config.json");
+            } else {
+                // no config.json at all — create with defaults
+                com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+                root.add("webUI", defaultWebUIConfig());
+                Files.writeString(CONFIG_FILE, GSON.toJson(root));
+                LOG.info("Created config.json with default webUI config");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to load/create config, using defaults", e);
+        }
+    }
+
+    private com.google.gson.JsonObject defaultWebUIConfig() {
+        com.google.gson.JsonObject webUI = new com.google.gson.JsonObject();
+        webUI.addProperty("enabled", true);
+        webUI.addProperty("port", 8080);
+        webUI.addProperty("websocketPort", 8081);
+        return webUI;
     }
 
     public void start() {
@@ -86,6 +124,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             status.put("username", CONFIG.authentication.username);
             status.put("proxyAddress", CONFIG.server.getProxyAddress());
             status.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
+            status.put("websocketPort", wsPort);
             sendJson(exchange, status);
         }
     }
@@ -94,7 +133,35 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
-            sendJson(exchange, CONFIG);
+            String method = exchange.getRequestMethod();
+            if ("GET".equals(method)) {
+                sendJson(exchange, CONFIG);
+            } else if ("POST".equals(method)) {
+                try {
+                    String body = new String(exchange.getRequestBody().readAllBytes());
+                    com.google.gson.JsonObject incoming = GSON.fromJson(body, com.google.gson.JsonObject.class);
+                    if (incoming == null) {
+                        sendJson(exchange, Map.of("success", false, "error", "Invalid JSON"));
+                        return;
+                    }
+                    // merge incoming fields into existing config.json
+                    com.google.gson.JsonObject root;
+                    if (Files.exists(CONFIG_FILE)) {
+                        root = GSON.fromJson(Files.readString(CONFIG_FILE), com.google.gson.JsonObject.class);
+                    } else {
+                        root = new com.google.gson.JsonObject();
+                    }
+                    for (var entry : incoming.entrySet()) {
+                        root.add(entry.getKey(), entry.getValue());
+                    }
+                    Files.writeString(CONFIG_FILE, GSON.toJson(root));
+                    sendJson(exchange, Map.of("success", true));
+                } catch (Exception e) {
+                    sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
+                }
+            } else {
+                sendJson(exchange, Map.of("error", "Method not allowed"));
+            }
         }
     }
 
@@ -102,11 +169,38 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
-            List<Map<String, Object>> modules = new ArrayList<>();
-            for (Module module : MODULE.getModules()) {
-                modules.add(Map.of("name", module.getClass().getSimpleName(), "enabled", module.isEnabled()));
+            String method = exchange.getRequestMethod();
+            if ("GET".equals(method)) {
+                List<Map<String, Object>> modules = new ArrayList<>();
+                for (Module module : MODULE.getModules()) {
+                    modules.add(Map.of("name", module.getClass().getSimpleName(), "enabled", module.isEnabled()));
+                }
+                sendJson(exchange, modules);
+            } else if ("POST".equals(method)) {
+                try {
+                    String body = new String(exchange.getRequestBody().readAllBytes());
+                    com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
+                    String name = json.get("name").getAsString();
+                    boolean enabled = json.get("enabled").getAsBoolean();
+                    boolean found = false;
+                    for (Module module : MODULE.getModules()) {
+                        if (module.getClass().getSimpleName().equals(name)) {
+                            module.setEnabled(enabled);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) {
+                        sendJson(exchange, Map.of("success", true));
+                    } else {
+                        sendJson(exchange, Map.of("success", false, "error", "Module not found: " + name));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
+                }
+            } else {
+                sendJson(exchange, Map.of("error", "Method not allowed"));
             }
-            sendJson(exchange, modules);
         }
     }
 
@@ -160,28 +254,52 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
             String path = exchange.getRequestURI().getPath();
             if ("/".equals(path)) path = "/index.html";
-            Path filePath = Path.of("plugins/webui/web" + path);
-            if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
-                byte[] content = Files.readAllBytes(filePath);
+
+            // try classpath first (bundled in JAR), then fallback to filesystem
+            byte[] content = loadResource(path);
+            if (content == null) content = loadFile(Path.of("plugins/webui/web" + path));
+
+            if (content != null) {
                 exchange.getResponseHeaders().set("Content-Type", getContentType(path));
                 exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
                 exchange.sendResponseHeaders(200, content.length);
                 exchange.getResponseBody().write(content);
             } else {
-                Path indexPath = Path.of("plugins/webui/web/index.html");
-                if (Files.exists(indexPath)) {
-                    byte[] content = Files.readAllBytes(indexPath);
+                // try index.html for SPA fallback
+                content = loadResource("/index.html");
+                if (content == null) content = loadFile(Path.of("plugins/webui/web/index.html"));
+                if (content != null) {
                     exchange.getResponseHeaders().set("Content-Type", "text/html");
+                    exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
                     exchange.sendResponseHeaders(200, content.length);
                     exchange.getResponseBody().write(content);
                 } else {
-                    String notFound = "404 Not Found - WebUI files not found at plugins/webui/web/";
+                    String notFound = "404 Not Found";
                     exchange.getResponseHeaders().set("Content-Type", "text/plain");
                     exchange.sendResponseHeaders(404, notFound.length());
                     exchange.getResponseBody().write(notFound.getBytes());
                 }
             }
             exchange.getResponseBody().close();
+        }
+
+        private byte[] loadResource(String path) {
+            if (path.startsWith("/")) path = path.substring(1);
+            try (var is = getClass().getResourceAsStream("/web/" + path)) {
+                if (is == null) return null;
+                return is.readAllBytes();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        private byte[] loadFile(Path path) {
+            try {
+                if (Files.exists(path) && !Files.isDirectory(path)) {
+                    return Files.readAllBytes(path);
+                }
+            } catch (Exception ignored) {}
+            return null;
         }
     }
 

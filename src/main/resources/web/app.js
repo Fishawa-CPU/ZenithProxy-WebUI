@@ -5,6 +5,7 @@ let ws = null;
 let logs = [];
 let commandHistory = [];
 let historyIndex = -1;
+let wsPort = 8081;
 const API_BASE = window.location.origin + '/api';
 
 // Initialize
@@ -83,6 +84,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 async function loadDashboard() {
     const status = await apiCall('/status');
     if (status) {
+        if (status.websocketPort) wsPort = status.websocketPort;
         document.getElementById('proxyStatus').textContent = status.connected ? '已连接' : '未连接';
         document.getElementById('proxyStatus').style.color = status.connected ? 'var(--success-color)' : 'var(--error-color)';
         document.getElementById('currentUsername').textContent = status.username || '-';
@@ -156,107 +158,65 @@ function renderConfigSections(config) {
     const container = document.getElementById('configContent');
     container.innerHTML = `
         <div class="config-section active" id="authSection">
-            <h3>认证设置</h3>
+            <h3>认证设置 <span class="en">Authentication</span></h3>
             <div class="form-group">
-                <label>账号类型</label>
+                <label>账号类型 <span class="en">Account Type</span></label>
                 <select id="accountType">
                     <option value="DEVICE_CODE" ${config.authentication?.accountType === 'DEVICE_CODE' ? 'selected' : ''}>Device Code</option>
-                    <option value="MSA" ${config.authentication?.accountType === 'MSA' ? 'selected' : ''}>Microsoft Account</option>
-                    <option value="OFFLINE" ${config.authentication?.accountType === 'OFFLINE' ? 'selected' : ''}>Offline</option>
+                    <option value="MSA" ${config.authentication?.accountType === 'MSA' ? 'selected' : ''}>Microsoft Account 微软账号</option>
+                    <option value="OFFLINE" ${config.authentication?.accountType === 'OFFLINE' ? 'selected' : ''}>Offline 离线</option>
                     <option value="PRISM" ${config.authentication?.accountType === 'PRISM' ? 'selected' : ''}>Prism</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>用户名</label>
+                <label>用户名 <span class="en">Username</span></label>
                 <input type="text" id="username" value="${config.authentication?.username || ''}">
             </div>
             <div class="form-group">
-                <label>邮箱</label>
+                <label>密码 <span class="en">Password</span></label>
+                <input type="password" id="password" value="${config.authentication?.password || ''}">
+            </div>
+            <div class="form-group">
+                <label>邮箱 <span class="en">Email</span></label>
                 <input type="email" id="email" value="${config.authentication?.email || ''}">
             </div>
         </div>
-        
+
         <div class="config-section" id="clientSection">
-            <h3>客户端设置</h3>
+            <h3>客户端设置 <span class="en">Client</span></h3>
             <div class="form-group">
-                <label>自动连接</label>
-                <input type="checkbox" id="autoConnect" ${config.client?.autoConnect ? 'checked' : ''}>
+                <label>自动连接 <span class="en">Auto Connect</span></label>
+                <label class="toggle">
+                    <input type="checkbox" id="autoConnect" ${config.client?.autoConnect ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
             </div>
             <div class="form-group">
-                <label>目标服务器</label>
+                <label>目标服务器 <span class="en">Target Server</span></label>
                 <input type="text" id="targetServer" value="${config.client?.server?.address || ''}">
             </div>
             <div class="form-group">
-                <label>目标端口</label>
+                <label>目标端口 <span class="en">Target Port</span></label>
                 <input type="number" id="targetPort" value="${config.client?.server?.port || 25565}">
             </div>
         </div>
-        
+
         <div class="config-section" id="serverSection">
-            <h3>服务器设置</h3>
+            <h3>服务器设置 <span class="en">Server</span></h3>
             <div class="form-group">
-                <label>监听地址</label>
+                <label>监听地址 <span class="en">Bind Address</span></label>
                 <input type="text" id="bindAddress" value="${config.server?.bind?.address || '0.0.0.0'}">
             </div>
             <div class="form-group">
-                <label>监听端口</label>
+                <label>监听端口 <span class="en">Bind Port</span></label>
                 <input type="number" id="bindPort" value="${config.server?.bind?.port || 25565}">
             </div>
             <div class="form-group">
-                <label>启用服务器</label>
-                <input type="checkbox" id="serverEnabled" ${config.server?.enabled ? 'checked' : ''}>
-            </div>
-        </div>
-        
-        <div class="config-section" id="discordSection">
-            <h3>Discord设置</h3>
-            <div class="form-group">
-                <label>启用Discord</label>
-                <input type="checkbox" id="discordEnabled" ${config.discord?.enable ? 'checked' : ''}>
-            </div>
-            <div class="form-group">
-                <label>Bot Token</label>
-                <input type="password" id="discordToken" value="${config.discord?.token || ''}">
-            </div>
-            <div class="form-group">
-                <label>频道ID</label>
-                <input type="text" id="discordChannel" value="${config.discord?.channelId || ''}">
-            </div>
-        </div>
-        
-        <div class="config-section" id="databaseSection">
-            <h3>数据库设置</h3>
-            <div class="form-group">
-                <label>启用数据库</label>
-                <input type="checkbox" id="databaseEnabled" ${config.database?.enabled ? 'checked' : ''}>
-            </div>
-            <div class="form-group">
-                <label>主机</label>
-                <input type="text" id="dbHost" value="${config.database?.host || ''}">
-            </div>
-            <div class="form-group">
-                <label>端口</label>
-                <input type="number" id="dbPort" value="${config.database?.port || 5432}">
-            </div>
-            <div class="form-group">
-                <label>用户名</label>
-                <input type="text" id="dbUsername" value="${config.database?.username || ''}">
-            </div>
-            <div class="form-group">
-                <label>密码</label>
-                <input type="password" id="dbPassword" value="${config.database?.password || ''}">
-            </div>
-        </div>
-        
-        <div class="config-section" id="debugSection">
-            <h3>调试设置</h3>
-            <div class="form-group">
-                <label>调试日志</label>
-                <input type="checkbox" id="debugLogs" ${config.debug?.debugLogs ? 'checked' : ''}>
-            </div>
-            <div class="form-group">
-                <label>数据包日志</label>
-                <input type="checkbox" id="packetLog" ${config.debug?.packetLog?.enabled ? 'checked' : ''}>
+                <label>启用服务器 <span class="en">Enable Server</span></label>
+                <label class="toggle">
+                    <input type="checkbox" id="serverEnabled" ${config.server?.enabled ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
             </div>
         </div>
     `;
@@ -280,10 +240,7 @@ function initConfigTabs() {
             const sectionMap = {
                 'authentication': 'authSection',
                 'client': 'clientSection',
-                'server': 'serverSection',
-                'discord': 'discordSection',
-                'database': 'databaseSection',
-                'debug': 'debugSection'
+                'server': 'serverSection'
             };
             
             document.getElementById(sectionMap[tabName])?.classList.add('active');
@@ -296,6 +253,7 @@ async function saveConfig() {
         authentication: {
             accountType: document.getElementById('accountType')?.value,
             username: document.getElementById('username')?.value,
+            password: document.getElementById('password')?.value,
             email: document.getElementById('email')?.value
         },
         client: {
@@ -311,32 +269,14 @@ async function saveConfig() {
                 port: parseInt(document.getElementById('bindPort')?.value) || 25565
             },
             enabled: document.getElementById('serverEnabled')?.checked
-        },
-        discord: {
-            enable: document.getElementById('discordEnabled')?.checked,
-            token: document.getElementById('discordToken')?.value,
-            channelId: document.getElementById('discordChannel')?.value
-        },
-        database: {
-            enabled: document.getElementById('databaseEnabled')?.checked,
-            host: document.getElementById('dbHost')?.value,
-            port: parseInt(document.getElementById('dbPort')?.value) || 5432,
-            username: document.getElementById('dbUsername')?.value,
-            password: document.getElementById('dbPassword')?.value
-        },
-        debug: {
-            debugLogs: document.getElementById('debugLogs')?.checked,
-            packetLog: {
-                enabled: document.getElementById('packetLog')?.checked
-            }
         }
     };
     
     const result = await apiCall('/config', 'POST', config);
     if (result?.success) {
-        showNotification('配置已保存', 'success');
+        showNotification('配置已保存 / Config saved', 'success');
     } else {
-        showNotification('保存失败: ' + (result?.error || '未知错误'), 'error');
+        showNotification('保存失败 / Save failed: ' + (result?.error || '未知错误 / Unknown error'), 'error');
     }
 }
 
@@ -382,9 +322,9 @@ async function executeCommand(command) {
         if (result.output && Array.isArray(result.output)) {
             result.output.forEach(line => addTerminalLine(line, 'output'));
         } else if (result.success) {
-            addTerminalLine('命令执行成功', 'success');
+            addTerminalLine('命令执行成功 / Command executed', 'success');
         } else {
-            addTerminalLine('错误: ' + (result.error || '未知错误'), 'error');
+            addTerminalLine('错误 / Error: ' + (result.error || '未知错误 / Unknown error'), 'error');
         }
     }
 }
@@ -402,8 +342,8 @@ function clearTerminal() {
     const output = document.getElementById('terminalOutput');
     output.innerHTML = `
         <div class="terminal-welcome">
-            <p>ZenithProxy 命令终端</p>
-            <p>输入命令并按回车执行</p>
+            <p>ZenithProxy 命令终端 <span class="en">Command Terminal</span></p>
+            <p>输入命令并按回车执行 <span class="en">Type a command and press Enter</span></p>
         </div>
     `;
 }
@@ -411,7 +351,7 @@ function clearTerminal() {
 // Logs
 function initWebSocket() {
     try {
-        ws = new WebSocket(`ws://${window.location.hostname}:8081`);
+        ws = new WebSocket(`ws://${window.location.hostname}:${wsPort}`);
         
         ws.onopen = () => {
             updateConnectionStatus(true);
@@ -439,13 +379,13 @@ function initWebSocket() {
 function updateConnectionStatus(connected) {
     const statusDot = document.querySelector('.status-dot');
     const statusText = document.querySelector('.status-text');
-    
+
     if (connected) {
         statusDot.className = 'status-dot connected';
-        statusText.textContent = '已连接';
+        statusText.innerHTML = '已连接 <span class="en" style="font-size:0.7rem;color:var(--ctp-overlay0);">Connected</span>';
     } else {
         statusDot.className = 'status-dot disconnected';
-        statusText.textContent = '未连接';
+        statusText.innerHTML = '未连接 <span class="en" style="font-size:0.7rem;color:var(--ctp-overlay0);">Disconnected</span>';
     }
 }
 
@@ -462,32 +402,32 @@ function handleWebSocketMessage(data) {
 
 function addLogEntry(log) {
     logs.push(log);
-    
+
     // Filter by level
     const levelFilter = document.getElementById('logLevel')?.value || 'all';
     if (levelFilter !== 'all' && log.level !== levelFilter) {
         return;
     }
-    
+
     const container = document.getElementById('logsOutput');
     const emptyMsg = container.querySelector('.log-empty');
     if (emptyMsg) {
         emptyMsg.remove();
     }
-    
+
     const entry = document.createElement('div');
     entry.className = 'log-entry';
-    
+
     const timestamp = new Date(log.timestamp).toLocaleTimeString();
     entry.innerHTML = `
         <span class="log-timestamp">${timestamp}</span>
         <span class="log-level ${log.level.toLowerCase()}">${log.level}</span>
         <span class="log-message">[${log.logger}] ${log.message}</span>
     `;
-    
+
     container.appendChild(entry);
     container.scrollTop = container.scrollHeight;
-    
+
     // Keep only last 1000 entries
     if (container.children.length > 1000) {
         container.removeChild(container.firstChild);
@@ -507,7 +447,7 @@ function filterLogs() {
 }
 
 function clearLogs() {
-    document.getElementById('logsOutput').innerHTML = '<div class="log-empty">等待日志...</div>';
+    document.getElementById('logsOutput').innerHTML = '<div class="log-empty">等待日志... Waiting for logs...</div>';
     logs = [];
 }
 
@@ -516,7 +456,7 @@ function exportLogs() {
         const timestamp = new Date(log.timestamp).toISOString();
         return `[${timestamp}] [${log.level}] [${log.logger}] ${log.message}`;
     }).join('\n');
-    
+
     const blob = new Blob([logText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -524,6 +464,7 @@ function exportLogs() {
     a.download = `zenithproxy-logs-${new Date().toISOString().split('T')[0]}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+    showNotification('日志已导出 / Logs exported', 'success');
 }
 
 // Players
@@ -532,15 +473,15 @@ async function loadPlayers() {
     if (players) {
         const container = document.getElementById('playersList');
         if (players.length === 0) {
-            container.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 40px;">没有连接的玩家</td></tr>';
+            container.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 40px; color: var(--ctp-overlay1);">没有连接的玩家 / No connected players</td></tr>';
         } else {
             container.innerHTML = players.map(player => `
                 <tr>
                     <td>${player.name}</td>
-                    <td>${player.uuid}</td>
-                    <td><span class="player-badge ${player.type}">${player.type === 'controller' ? '控制器' : '观察者'}</span></td>
+                    <td style="font-family: monospace; font-size: 0.85rem; color: var(--ctp-overlay1);">${player.uuid}</td>
+                    <td><span class="player-badge ${player.type}">${player.type === 'controller' ? '控制器 Controller' : '观察者 Spectator'}</span></td>
                     <td>
-                        <button class="btn btn-secondary" onclick="sendCommand('/kick ${player.name}')">踢出</button>
+                        <button class="btn btn-secondary" onclick="sendCommand('/kick ${player.name}')">踢出 Kick</button>
                     </td>
                 </tr>
             `).join('');
@@ -561,7 +502,7 @@ function updateDashboardStatus(status) {
     if (status) {
         document.getElementById('proxyStatus').textContent = status.connected ? '已连接' : '未连接';
         document.getElementById('proxyStatus').style.color = status.connected ? 'var(--success-color)' : 'var(--error-color)';
-        
+
         if (status.inQueue) {
             document.getElementById('queueStatus').textContent = `队列位置: ${status.queuePosition}`;
             document.getElementById('queueStatus').style.color = 'var(--warning-color)';
@@ -573,23 +514,24 @@ function updateDashboardStatus(status) {
 }
 
 function showNotification(message, type = 'info') {
-    // Create notification element
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
     notification.textContent = message;
     notification.style.cssText = `
         position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 25px;
-        border-radius: 8px;
-        color: white;
+        top: 16px;
+        right: 16px;
+        padding: 12px 20px;
+        border-radius: 4px;
+        color: var(--ctp-crust);
         font-weight: 500;
+        font-size: 0.85rem;
         z-index: 1000;
-        animation: slideIn 0.3s ease;
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
     `;
-    
-    // Set color based on type
+
     switch (type) {
         case 'success':
             notification.style.backgroundColor = 'var(--success-color)';
@@ -603,39 +545,17 @@ function showNotification(message, type = 'info') {
         default:
             notification.style.backgroundColor = 'var(--info-color)';
     }
-    
+
     document.body.appendChild(notification);
-    
-    // Remove after 3 seconds
+
+    requestAnimationFrame(() => {
+        notification.style.opacity = '1';
+        notification.style.transform = 'translateY(0)';
+    });
+
     setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateY(-8px)';
+        setTimeout(() => notification.remove(), 200);
     }, 3000);
 }
-
-// Add CSS animations
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-    
-    @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-    }
-`;
-document.head.appendChild(style);

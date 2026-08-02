@@ -8,18 +8,11 @@ group = "com.zenith.webui"
 version = "1.0.0"
 
 java {
-    toolchain { languageVersion = JavaLanguageVersion.of(25) }
-}
-
-repositories {
-    mavenLocal()
-    mavenCentral()
-    maven("https://maven.2b2t.vc/releases")
-    maven("https://maven.2b2t.vc/remote")
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
 }
 
 dependencies {
-    compileOnly("com.zenith:ZenithProxy:26.1.2-SNAPSHOT")
+    compileOnly(files("libs/ZenithProxy.jar"))
 }
 
 tasks.shadowJar {
