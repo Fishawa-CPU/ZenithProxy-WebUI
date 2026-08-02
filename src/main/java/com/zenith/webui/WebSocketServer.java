@@ -2,8 +2,6 @@ package com.zenith.webui;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.zenith.command.api.CommandContext;
-import com.zenith.command.api.CommandSources;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -12,8 +10,6 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Logger;
-
-import static com.zenith.Globals.COMMAND;
 
 public class WebSocketServer {
     private static final Logger LOGGER = Logger.getLogger("WebSocket");
@@ -65,58 +61,13 @@ public class WebSocketServer {
         log.addProperty("logger", logger);
         log.addProperty("message", message);
         log.addProperty("timestamp", System.currentTimeMillis());
-        broadcast("log", log);
-    }
 
-    void handleCommand(String clientId, String command) {
-        // Echo the command back
-        JsonObject echo = new JsonObject();
-        echo.addProperty("text", "> " + command);
-        echo.addProperty("type", "command");
-        sendTo(clientId, "terminal", echo);
-
-        // Execute the command
-        try {
-            CommandContext context = CommandContext.create(command, CommandSources.TERMINAL);
-            COMMAND.execute(context);
-            List<String> output = context.getMultiLineOutput();
-
-            JsonObject result = new JsonObject();
-            result.addProperty("success", true);
-            if (output != null && !output.isEmpty()) {
-                com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
-                for (String line : output) arr.add(line);
-                result.add("output", arr);
-            } else {
-                result.addProperty("message", "OK");
-            }
-            sendTo(clientId, "command_result", result);
-        } catch (Exception e) {
-            JsonObject err = new JsonObject();
-            err.addProperty("success", false);
-            err.addProperty("error", e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
-            sendTo(clientId, "command_result", err);
-        }
-    }
-
-    private void broadcast(String type, Object data) {
         JsonObject msg = new JsonObject();
-        msg.addProperty("type", type);
-        msg.add("data", GSON.toJsonTree(data));
+        msg.addProperty("type", "log");
+        msg.add("data", GSON.toJsonTree(log));
         String json = GSON.toJson(msg);
         clients.removeIf(c -> !c.isOpen());
         clients.forEach(c -> c.send(json));
-    }
-
-    private void sendTo(String clientId, String type, Object data) {
-        JsonObject msg = new JsonObject();
-        msg.addProperty("type", type);
-        msg.add("data", GSON.toJsonTree(data));
-        String json = GSON.toJson(msg);
-        clients.removeIf(c -> !c.isOpen());
-        for (WSClient c : clients) {
-            if (c.id.equals(clientId)) { c.send(json); break; }
-        }
     }
 
     class WSClient implements Runnable {
@@ -124,45 +75,22 @@ public class WebSocketServer {
         private final DataInputStream in;
         private final DataOutputStream out;
         private volatile boolean open;
-        final String id;
 
         WSClient(Socket s) throws IOException {
             this.socket = s;
             this.in = new DataInputStream(s.getInputStream());
             this.out = new DataOutputStream(s.getOutputStream());
             this.open = true;
-            this.id = UUID.randomUUID().toString().substring(0, 8);
         }
 
         public void run() {
             try {
                 handshake();
-                // Send welcome
-                JsonObject welcome = new JsonObject();
-                welcome.addProperty("clientId", id);
-                welcome.addProperty("message", "Connected to ZenithProxy Terminal");
-                send(GSON.toJson(Map.of("type", "welcome", "data", welcome)));
-
                 while (open) {
                     String msg = readFrame();
                     if (msg == null) break;
-                    handleIncoming(msg);
                 }
             } catch (Exception e) { /* closed */ } finally { close(); }
-        }
-
-        private void handleIncoming(String raw) {
-            try {
-                JsonObject json = GSON.fromJson(raw, JsonObject.class);
-                if (json == null || !json.has("type")) return;
-                String type = json.get("type").getAsString();
-                if ("command".equals(type) && json.has("data")) {
-                    String cmd = json.get("data").getAsString();
-                    if (cmd != null && !cmd.trim().isEmpty()) {
-                        handleCommand(id, cmd.trim());
-                    }
-                }
-            } catch (Exception ignored) {}
         }
 
         private void handshake() throws IOException {
@@ -175,9 +103,8 @@ public class WebSocketServer {
             }
             if (key == null) throw new IOException("Invalid handshake");
             byte[] digest;
-            try {
-                digest = MessageDigest.getInstance("SHA-1").digest((key + WS_MAGIC).getBytes("UTF-8"));
-            } catch (Exception e) { throw new IOException(e); }
+            try { digest = MessageDigest.getInstance("SHA-1").digest((key + WS_MAGIC).getBytes("UTF-8")); }
+            catch (Exception e) { throw new IOException(e); }
             String accept = java.util.Base64.getEncoder().encodeToString(digest);
             out.writeBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
             out.flush();
