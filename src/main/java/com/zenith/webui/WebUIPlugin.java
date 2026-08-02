@@ -19,7 +19,6 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 import static com.zenith.Globals.*;
@@ -35,9 +34,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private HttpServer httpServer;
     private WebSocketServer webSocketServer;
     private PluginAPI api;
-    private static final Path PLAYER_HISTORY_FILE = Path.of("plugins/webui/player_history.json");
-    private static final Path WHITELIST_FILE = Path.of("plugins/webui/whitelist.json");
-    private static final Map<String, Map<String, Object>> playerHistory = new ConcurrentHashMap<>();
 
     @Override
     public void onLoad(PluginAPI pluginAPI) {
@@ -96,9 +92,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             httpServer.createContext("/api/players", new PlayersHandler());
             httpServer.createContext("/api/queue", new QueueHandler());
             httpServer.createContext("/api/logs", new LogsFileHandler());
-            httpServer.createContext("/api/player-history", new PlayerHistoryHandler());
-            httpServer.createContext("/api/whitelist", new WhitelistHandler());
-            httpServer.createContext("/api/webui-config", new WebUIConfigHandler());
             httpServer.createContext("/api/system", new SystemHandler());
             httpServer.createContext("/api/latency", new LatencyHandler());
             httpServer.createContext("/", new StaticFileHandler());
@@ -316,13 +309,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             Map<String, Object> data = new LinkedHashMap<>();
             try {
                 var currentPlayer = Proxy.getInstance().getCurrentPlayer().get();
-                if (currentPlayer != null) {
-                    data.put("latency", currentPlayer.getLatency());
-                    data.put("connected", true);
-                } else {
-                    data.put("latency", -1);
-                    data.put("connected", false);
-                }
+                data.put("connected", currentPlayer != null);
+                data.put("latency", currentPlayer != null ? 0 : -1);
             } catch (Exception e) {
                 data.put("latency", -1);
                 data.put("connected", false);
@@ -362,19 +350,23 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             data.put("memoryTotalMB", memTotalMB);
             data.put("memoryPercent", memPercent);
 
-            // Network (track delta)
+            // Network (read from /proc/net/dev on Linux)
             long now = System.currentTimeMillis();
             long totalBytesIn = 0;
             long totalBytesOut = 0;
             try {
-                java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
-                while (interfaces.hasMoreElements()) {
-                    java.net.NetworkInterface ni = interfaces.nextElement();
-                    if (ni.isLoopback() || !ni.isUp()) continue;
-                    var stats = ni.getStats();
-                    if (stats != null) {
-                        totalBytesIn += stats.getBytesReceived();
-                        totalBytesOut += stats.getBytesSent();
+                List<String> lines = Files.readAllLines(Path.of("/proc/net/dev"));
+                for (String line : lines) {
+                    line = line.trim();
+                    if (line.contains(":") && !line.startsWith("Inter") && !line.startsWith("face")) {
+                        String[] parts = line.split(":");
+                        if (parts.length >= 2) {
+                            String[] stats = parts[1].trim().split("\\s+");
+                            if (stats.length >= 10) {
+                                totalBytesIn += Long.parseLong(stats[0]);
+                                totalBytesOut += Long.parseLong(stats[8]);
+                            }
+                        }
                     }
                 }
             } catch (Exception ignored) {}
