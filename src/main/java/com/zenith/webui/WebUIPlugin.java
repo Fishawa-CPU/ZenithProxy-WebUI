@@ -19,6 +19,7 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 import static com.zenith.Globals.*;
@@ -34,6 +35,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private HttpServer httpServer;
     private WebSocketServer webSocketServer;
     private PluginAPI api;
+    private static final Path PLAYER_HISTORY_FILE = Path.of("plugins/webui/player_history.json");
+    private static final Path WHITELIST_FILE = Path.of("plugins/webui/whitelist.json");
+    private static final Map<String, Map<String, Object>> playerHistory = new ConcurrentHashMap<>();
 
     @Override
     public void onLoad(PluginAPI pluginAPI) {
@@ -91,6 +95,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             httpServer.createContext("/api/commands", new CommandsHandler());
             httpServer.createContext("/api/players", new PlayersHandler());
             httpServer.createContext("/api/queue", new QueueHandler());
+            httpServer.createContext("/api/logs", new LogsFileHandler());
+            httpServer.createContext("/api/player-history", new PlayerHistoryHandler());
+            httpServer.createContext("/api/whitelist", new WhitelistHandler());
+            httpServer.createContext("/api/webui-config", new WebUIConfigHandler());
+            httpServer.createContext("/api/system", new SystemHandler());
+            httpServer.createContext("/api/latency", new LatencyHandler());
             httpServer.createContext("/", new StaticFileHandler());
 
             webSocketServer = new WebSocketServer(wsPort);
@@ -245,6 +255,154 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             queue.put("inQueue", Proxy.getInstance().isInQueue());
             queue.put("position", Proxy.getInstance().getQueuePosition());
             sendJson(exchange, queue);
+        }
+    }
+
+    private static class LogsFileHandler implements HttpHandler {
+        private static final Path LOGS_DIR = Path.of("logs");
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            String query = exchange.getRequestURI().getQuery();
+            if (query != null && query.contains("file=")) {
+                // Serve a specific log file
+                String fileName = query.replace("file=", "").trim();
+                if (fileName.contains("..") || fileName.contains("/") || fileName.contains("\\")) {
+                    sendJson(exchange, Map.of("success", false, "error", "Invalid filename"));
+                    return;
+                }
+                Path file = LOGS_DIR.resolve(fileName);
+                if (!Files.exists(file) || Files.isDirectory(file)) {
+                    sendJson(exchange, Map.of("success", false, "error", "File not found"));
+                    return;
+                }
+                byte[] content = Files.readAllBytes(file);
+                String nameLower = fileName.toLowerCase();
+                String ct = "text/plain";
+                if (nameLower.endsWith(".gz")) ct = "application/gzip";
+                else if (nameLower.endsWith(".zip")) ct = "application/zip";
+                exchange.getResponseHeaders().set("Content-Type", ct);
+                exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
+                exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+                exchange.sendResponseHeaders(200, content.length);
+                exchange.getResponseBody().write(content);
+                exchange.getResponseBody().close();
+            } else {
+                // List log files
+                List<Map<String, Object>> files = new ArrayList<>();
+                if (Files.exists(LOGS_DIR) && Files.isDirectory(LOGS_DIR)) {
+                    try (var stream = Files.list(LOGS_DIR)) {
+                        stream.filter(p -> !Files.isDirectory(p)).sorted((a, b) -> {
+                            try { return Files.getLastModifiedTime(b).compareTo(Files.getLastModifiedTime(a)); }
+                            catch (IOException e) { return 0; }
+                        }).forEach(p -> {
+                            Map<String, Object> info = new LinkedHashMap<>();
+                            info.put("name", p.getFileName().toString());
+                            try { info.put("size", Files.size(p)); } catch (IOException e) { info.put("size", 0); }
+                            try { info.put("lastModified", Files.getLastModifiedTime(p).toMillis()); } catch (IOException e) { info.put("lastModified", 0); }
+                            files.add(info);
+                        });
+                    }
+                }
+                sendJson(exchange, files);
+            }
+        }
+    }
+
+    private static class LatencyHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            Map<String, Object> data = new LinkedHashMap<>();
+            try {
+                var currentPlayer = Proxy.getInstance().getCurrentPlayer().get();
+                if (currentPlayer != null) {
+                    data.put("latency", currentPlayer.getLatency());
+                    data.put("connected", true);
+                } else {
+                    data.put("latency", -1);
+                    data.put("connected", false);
+                }
+            } catch (Exception e) {
+                data.put("latency", -1);
+                data.put("connected", false);
+            }
+            sendJson(exchange, data);
+        }
+    }
+
+    private static class SystemHandler implements HttpHandler {
+        private static long lastNetworkTime = 0;
+        private static long lastBytesIn = 0;
+        private static long lastBytesOut = 0;
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            Map<String, Object> data = new LinkedHashMap<>();
+
+            // CPU
+            double cpuLoad = -1;
+            try {
+                java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+                cpuLoad = osBean.getSystemLoadAverage();
+                if (cpuLoad >= 0) cpuLoad = Math.round(cpuLoad * 100.0) / 100.0;
+            } catch (Exception ignored) {}
+            data.put("cpuLoad", cpuLoad);
+
+            // Memory
+            Runtime rt = Runtime.getRuntime();
+            long totalMem = rt.maxMemory();
+            long freeMem = rt.freeMemory();
+            long usedMem = rt.totalMemory() - freeMem;
+            double memUsedMB = Math.round(usedMem / 1048576.0 * 10.0) / 10.0;
+            double memTotalMB = Math.round(totalMem / 1048576.0 * 10.0) / 10.0;
+            double memPercent = Math.round(usedMem * 10000.0 / totalMem) / 100.0;
+            data.put("memoryUsedMB", memUsedMB);
+            data.put("memoryTotalMB", memTotalMB);
+            data.put("memoryPercent", memPercent);
+
+            // Network (track delta)
+            long now = System.currentTimeMillis();
+            long totalBytesIn = 0;
+            long totalBytesOut = 0;
+            try {
+                java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+                while (interfaces.hasMoreElements()) {
+                    java.net.NetworkInterface ni = interfaces.nextElement();
+                    if (ni.isLoopback() || !ni.isUp()) continue;
+                    var stats = ni.getStats();
+                    if (stats != null) {
+                        totalBytesIn += stats.getBytesReceived();
+                        totalBytesOut += stats.getBytesSent();
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            long deltaIn = 0, deltaOut = 0;
+            double bytesPerSecIn = 0, bytesPerSecOut = 0;
+            if (lastNetworkTime > 0) {
+                double elapsed = (now - lastNetworkTime) / 1000.0;
+                if (elapsed > 0) {
+                    deltaIn = totalBytesIn - lastBytesIn;
+                    deltaOut = totalBytesOut - lastBytesOut;
+                    bytesPerSecIn = Math.round(deltaIn / elapsed * 10.0) / 10.0;
+                    bytesPerSecOut = Math.round(deltaOut / elapsed * 10.0) / 10.0;
+                }
+            }
+            lastNetworkTime = now;
+            lastBytesIn = totalBytesIn;
+            lastBytesOut = totalBytesOut;
+
+            data.put("netBytesPerSecIn", bytesPerSecIn);
+            data.put("netBytesPerSecOut", bytesPerSecOut);
+            data.put("netTotalBytesIn", totalBytesIn);
+            data.put("netTotalBytesOut", totalBytesOut);
+
+            // Thread count
+            data.put("threadCount", Thread.activeCount());
+
+            sendJson(exchange, data);
         }
     }
 

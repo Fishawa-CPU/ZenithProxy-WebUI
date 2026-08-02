@@ -283,6 +283,32 @@ body {
     color: var(--ctp-text);
 }
 
+/* ── Charts ─────────────────────────────────── */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.chart-card {
+    background-color: var(--ctp-surface0);
+    border: 1px solid var(--ctp-surface1);
+    padding: 16px;
+}
+
+.chart-card h3 {
+    font-size: 0.82rem;
+    color: var(--ctp-overlay1);
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+
+.chart-card canvas {
+    width: 100% !important;
+    height: 160px !important;
+}
+
 /* ── Modules ────────────────────────────────── */
 .modules-grid {
     display: grid;
@@ -452,7 +478,7 @@ body {
 }
 
 .terminal-output {
-    height: 500px;
+    height: 560px;
     overflow-y: auto;
     padding: 16px;
 }
@@ -462,31 +488,81 @@ body {
     margin-bottom: 16px;
 }
 
+.terminal-welcome p {
+    margin-bottom: 4px;
+    font-size: 0.82rem;
+}
+
 .terminal-line {
     margin-bottom: 2px;
     word-wrap: break-word;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     line-height: 1.5;
 }
 
-.terminal-line.command {
+.terminal-line-command {
     color: var(--ctp-mauve);
+    font-weight: 600;
 }
 
-.terminal-line.info {
-    color: var(--ctp-sapphire);
+.terminal-line-output {
+    color: var(--ctp-text);
 }
 
-.terminal-line.warn {
-    color: var(--ctp-yellow);
+.terminal-line-success {
+    color: var(--ctp-green);
 }
 
-.terminal-line.error {
+.terminal-line-error {
     color: var(--ctp-red);
 }
 
-.terminal-line.success {
-    color: var(--ctp-green);
+.terminal-line-warn {
+    color: var(--ctp-yellow);
+}
+
+.terminal-line-info {
+    color: var(--ctp-sapphire);
+}
+
+/* Log entries inside terminal */
+.terminal-line-log {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 0;
+    border-bottom: 1px solid var(--ctp-surface0);
+}
+
+.log-ts {
+    color: var(--ctp-overlay0);
+    white-space: nowrap;
+    font-size: 0.75rem;
+}
+
+.log-lv {
+    font-weight: 600;
+    min-width: 44px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+}
+
+.log-lv.info { color: var(--ctp-sapphire); }
+.log-lv.warn { color: var(--ctp-yellow); }
+.log-lv.error { color: var(--ctp-red); }
+.log-lv.debug { color: var(--ctp-overlay1); }
+
+.log-msg {
+    flex: 1;
+    word-break: break-all;
+    color: var(--ctp-subtext1);
+}
+
+/* Terminal input */
+.terminal-input-wrapper {
+    position: relative;
 }
 
 .terminal-input-container {
@@ -517,68 +593,49 @@ body {
     color: var(--ctp-overlay0);
 }
 
-/* ── Logs ───────────────────────────────────── */
-.logs-container {
-    background-color: var(--ctp-crust);
-    border: 1px solid var(--ctp-surface1);
-}
-
-.logs-output {
-    height: 600px;
-    overflow-y: auto;
-    padding: 12px 16px;
-    font-family: 'JetBrains Mono', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: 0.8rem;
-}
-
-.log-empty {
-    color: var(--ctp-overlay0);
-    text-align: center;
-    padding: 40px;
-}
-
-.log-entry {
-    padding: 4px 0;
-    border-bottom: 1px solid var(--ctp-surface0);
+/* Terminal controls */
+.terminal-controls {
     display: flex;
-    align-items: baseline;
-    gap: 10px;
+    gap: 8px;
+    align-items: center;
 }
 
-.log-timestamp {
-    color: var(--ctp-overlay0);
-    white-space: nowrap;
-    font-size: 0.75rem;
+/* Autocomplete dropdown */
+.autocomplete-dropdown {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    background-color: var(--ctp-mantle);
+    border: 1px solid var(--ctp-surface1);
+    border-bottom: none;
+    z-index: 200;
 }
 
-.log-level {
-    font-weight: 600;
-    min-width: 48px;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+.autocomplete-dropdown.visible {
+    display: block;
 }
 
-.log-level.info {
-    color: var(--ctp-sapphire);
-}
-
-.log-level.warn {
-    color: var(--ctp-yellow);
-}
-
-.log-level.error {
-    color: var(--ctp-red);
-}
-
-.log-level.debug {
-    color: var(--ctp-overlay1);
-}
-
-.log-message {
-    flex: 1;
-    word-break: break-all;
+.autocomplete-item {
+    padding: 8px 16px;
+    font-size: 0.82rem;
     color: var(--ctp-subtext1);
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+    font-family: 'JetBrains Mono', 'Menlo', monospace;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+    background-color: var(--ctp-surface0);
+    color: var(--ctp-text);
+}
+
+.autocomplete-item.selected {
+    border-left: 2px solid var(--ctp-mauve);
 }
 
 /* ── Players ────────────────────────────────── */
@@ -631,13 +688,7 @@ body {
     color: var(--ctp-subtext1);
 }
 
-/* ── Log Controls ───────────────────────────── */
-.log-controls {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
+/* ── Select (shared) ────────────────────────── */
 .select {
     padding: 8px 12px;
     border: 1px solid var(--ctp-surface1);
@@ -647,6 +698,11 @@ body {
     font-size: 0.85rem;
     font-family: inherit;
     cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236e738d' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 32px;
 }
 
 /* ── Bilingual ──────────────────────────────── */
@@ -681,18 +737,6 @@ body {
     font-weight: 400;
 }
 
-.log-level-cell {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.log-level-cell .en {
-    font-size: 0.65rem;
-    color: var(--ctp-overlay0);
-    font-weight: 400;
-}
-
 /* ── Scrollbar ──────────────────────────────── */
 ::-webkit-scrollbar {
     width: 4px;
@@ -718,10 +762,16 @@ body {
     .dashboard-grid {
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     }
+    .charts-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 /* Mobile */
 @media (max-width: 768px) {
+    .charts-grid {
+        grid-template-columns: 1fr;
+    }
     .sidebar {
         width: var(--sidebar-collapsed);
     }
@@ -769,7 +819,7 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .log-controls {
+    .terminal-controls {
         flex-wrap: wrap;
     }
 
@@ -794,10 +844,6 @@ body {
     .terminal-output {
         height: 400px;
     }
-
-    .logs-output {
-        height: 450px;
-    }
 }
 
 /* Small mobile */
@@ -821,11 +867,7 @@ body {
     }
 
     .terminal-output {
-        height: 350px;
-    }
-
-    .logs-output {
-        height: 400px;
+        height: 320px;
     }
 
     .players-container {
