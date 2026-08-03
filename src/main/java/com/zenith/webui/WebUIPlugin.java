@@ -712,6 +712,22 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
         ctx.writeAndFlush(response);
 
+        // Push recent history first so the client sees existing logs
+        for (Map<String, Object> entry : logBuffer) {
+            com.google.gson.JsonObject log = new com.google.gson.JsonObject();
+            log.addProperty("level", (String) entry.get("level"));
+            log.addProperty("logger", (String) entry.get("logger"));
+            log.addProperty("message", (String) entry.get("message"));
+            log.addProperty("timestamp", (long) entry.get("timestamp"));
+            String json = GSON.toJson(log);
+            String sseData = "data: " + json + "\n\n";
+            try {
+                ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
+                ctx.write(new DefaultHttpContent(buf));
+            } catch (Exception ignored) {}
+        }
+        ctx.flush();
+
         sseClients.add(ctx.channel());
     }
 

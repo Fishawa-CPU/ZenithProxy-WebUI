@@ -351,6 +351,24 @@ function processDashboardData(d) {
     if (!d) return;
     const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+    // Proxy status
+    const statusEl = document.getElementById('proxyStatus');
+    if (statusEl) {
+        statusEl.textContent = d.connected ? '已连接' : '未连接';
+        statusEl.style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
+    }
+
+    // Player connection count
+    const pc = document.getElementById('playerConnection');
+    if (pc && d.latency && d.latency.players && d.latency.players.length > 0) {
+        const names = d.latency.players.map(x => x.name).join(', ');
+        pc.textContent = `${d.latency.players.length} 人: ${names}`;
+        pc.style.color = 'var(--success-color)';
+    } else if (pc) {
+        pc.textContent = '无连接';
+        pc.style.color = 'var(--ctp-overlay1)';
+    }
+
     // Update connected state
     const wasConnected = currentConnected;
     currentConnected = d.connected || false;
