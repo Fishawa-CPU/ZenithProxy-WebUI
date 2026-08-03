@@ -391,7 +391,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
-    // Module class name -> command name mapping
+    // Module class name -> command name mapping (only modules that have commands)
     private static final Map<String, String> MODULE_COMMAND_MAP = new LinkedHashMap<>();
     static {
         MODULE_COMMAND_MAP.put("AutoTotem", "autoTotem");
@@ -413,37 +413,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         MODULE_COMMAND_MAP.put("ChatHistory", "chatHistory");
         MODULE_COMMAND_MAP.put("ExtraChat", "extraChat");
         MODULE_COMMAND_MAP.put("ChatSchema", "chatSchema");
-        MODULE_COMMAND_MAP.put("ChatColor", "chatColor");
-        MODULE_COMMAND_MAP.put("ChatFormat", "chatFormat");
         MODULE_COMMAND_MAP.put("KillAura", "killAura");
         MODULE_COMMAND_MAP.put("Pathfinder", "pathfinder");
-        MODULE_COMMAND_MAP.put("ClickAura", "clickAura");
-        MODULE_COMMAND_MAP.put("ChestAura", "chestAura");
-        MODULE_COMMAND_MAP.put("Scaffold", "scaffold");
-        MODULE_COMMAND_MAP.put("ElytraFly", "elytraFly");
-        MODULE_COMMAND_MAP.put("NoFall", "noFall");
-        MODULE_COMMAND_MAP.put("NoSlowdown", "noSlowdown");
-        MODULE_COMMAND_MAP.put("Sprint", "sprint");
-        MODULE_COMMAND_MAP.put("FullBright", "fullBright");
-        MODULE_COMMAND_MAP.put("ChestSteal", "chestSteal");
-        MODULE_COMMAND_MAP.put("InventoryCleaner", "inventoryCleaner");
-        MODULE_COMMAND_MAP.put("FastPlace", "fastPlace");
-        MODULE_COMMAND_MAP.put("FastBreak", "fastBreak");
-        MODULE_COMMAND_MAP.put("FastBow", "fastBow");
-        MODULE_COMMAND_MAP.put("ClickTP", "clickTP");
-        MODULE_COMMAND_MAP.put("StorageESP", "storageESP");
-        MODULE_COMMAND_MAP.put("PlayerESP", "playerESP");
-        MODULE_COMMAND_MAP.put("EntityESP", "entityESP");
-        MODULE_COMMAND_MAP.put("ChestESP", "chestESP");
-        MODULE_COMMAND_MAP.put("Xray", "xray");
-        MODULE_COMMAND_MAP.put("Tracers", "tracers");
-        MODULE_COMMAND_MAP.put("Nametags", "nametags");
-        MODULE_COMMAND_MAP.put("ESP", "esp");
-        MODULE_COMMAND_MAP.put("Freecam", "freecam");
-        MODULE_COMMAND_MAP.put("FakePlayer", "fakePlayer");
-        MODULE_COMMAND_MAP.put("SkinProtect", "skinProtect");
-        MODULE_COMMAND_MAP.put("AntiVoid", "antiVoid");
-        MODULE_COMMAND_MAP.put("HoleESP", "holeESP");
         MODULE_COMMAND_MAP.put("Schematic", "schematic");
         MODULE_COMMAND_MAP.put("Replay", "replay");
         MODULE_COMMAND_MAP.put("Stats", "stats");
@@ -513,13 +484,20 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     String name = json.get("name").getAsString();
                     boolean enabled = json.get("enabled").getAsBoolean();
                     String cmdName = MODULE_COMMAND_MAP.get(name);
-                    if (cmdName == null) {
-                        sendJson(exchange, Map.of("success", false, "error", "No command mapping for: " + name));
-                        return;
+                    if (cmdName != null) {
+                        // Use command system: `<cmd> toggle on/off`
+                        String cmd = cmdName + " toggle " + (enabled ? "on" : "off");
+                        CommandContext context = CommandContext.create(cmd, CommandSources.TERMINAL);
+                        COMMAND.execute(context);
+                    } else {
+                        // No command available, use direct API
+                        for (Module module : MODULE.getModules().toArray(new Module[0])) {
+                            if (module.getClass().getSimpleName().equals(name)) {
+                                module.setEnabled(enabled);
+                                break;
+                            }
+                        }
                     }
-                    String cmd = cmdName + (enabled ? " enable" : " disable");
-                    CommandContext context = CommandContext.create(cmd, CommandSources.TERMINAL);
-                    COMMAND.execute(context);
                     saveModuleState(name, enabled);
                     sendJson(exchange, Map.of("success", true));
                 } catch (Exception e) {
