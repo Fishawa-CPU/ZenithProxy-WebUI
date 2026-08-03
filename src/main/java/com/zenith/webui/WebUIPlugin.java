@@ -268,7 +268,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             EVENT_BUS.subscribe(this, QueueCompleteEvent.class, e ->
                 broadcastLog("INFO", "Queue", "队列完成，已进入服务器 / Queue complete, entering server"));
 
-            loadModuleStates();
+            // Delay module state loading to ensure modules are fully initialized
+            Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+                loadModuleStates();
+                LOG.info("Module states loaded from config");
+            }, 2, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.error("Failed to start WebUI", e);
         }
