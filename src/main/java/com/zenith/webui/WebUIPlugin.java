@@ -391,60 +391,112 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
-    // Module class name -> command name (only modules with toggle on/off support)
-    private static final Map<String, String> MODULE_COMMAND_MAP = new LinkedHashMap<>();
+    // Module config: className -> { commandName (null if no command), chineseName }
+    private static final Map<String, String[]> MODULE_CONFIG = new LinkedHashMap<>();
     static {
-        MODULE_COMMAND_MAP.put("ActionLimiter", "actionLimiter");
-        MODULE_COMMAND_MAP.put("ActiveHours", "activeHours");
-        MODULE_COMMAND_MAP.put("AntiAFK", "antiAFK");
-        MODULE_COMMAND_MAP.put("AntiKick", "antiKick");
-        MODULE_COMMAND_MAP.put("AntiLeak", "antiLeak");
-        MODULE_COMMAND_MAP.put("AutoArmor", "autoArmor");
-        MODULE_COMMAND_MAP.put("AutoDisconnect", "autoDisconnect");
-        MODULE_COMMAND_MAP.put("AutoDrop", "autoDrop");
-        MODULE_COMMAND_MAP.put("AutoEat", "autoEat");
-        MODULE_COMMAND_MAP.put("AutoFish", "autoFish");
-        MODULE_COMMAND_MAP.put("AutoMend", "autoMend");
-        MODULE_COMMAND_MAP.put("AutoOmen", "autoOmen");
-        MODULE_COMMAND_MAP.put("AutoReconnect", "autoReconnect");
-        MODULE_COMMAND_MAP.put("AutoReply", "autoReply");
-        MODULE_COMMAND_MAP.put("AutoRespawn", "autoRespawn");
-        MODULE_COMMAND_MAP.put("AutoTotem", "autoTotem");
-        MODULE_COMMAND_MAP.put("AutoUpdate", "autoUpdate");
-        MODULE_COMMAND_MAP.put("ChatHistory", "chatHistory");
-        MODULE_COMMAND_MAP.put("ChatRelay", "chatRelay");
-        MODULE_COMMAND_MAP.put("Click", "click");
-        MODULE_COMMAND_MAP.put("ClientConnection", "clientConnection");
-        MODULE_COMMAND_MAP.put("CommandConfig", "commandConfig");
-        MODULE_COMMAND_MAP.put("ConnectionTest", "connectionTest");
-        MODULE_COMMAND_MAP.put("CoordinateObfuscation", "coordObf");
-        MODULE_COMMAND_MAP.put("Database", "database");
-        MODULE_COMMAND_MAP.put("DiscordManage", "discord");
-        MODULE_COMMAND_MAP.put("DiscordNotifications", "discordNotifications");
-        MODULE_COMMAND_MAP.put("DisplayCoords", "displayCoords");
-        MODULE_COMMAND_MAP.put("ExtraChat", "extraChat");
-        MODULE_COMMAND_MAP.put("Inventory", "inventory");
-        MODULE_COMMAND_MAP.put("KillAura", "killAura");
-        MODULE_COMMAND_MAP.put("PacketLog", "packetLog");
-        MODULE_COMMAND_MAP.put("Pathfinder", "pathfinder");
-        MODULE_COMMAND_MAP.put("Plugins", "plugins");
-        MODULE_COMMAND_MAP.put("Prio", "prio");
-        MODULE_COMMAND_MAP.put("QueueStatus", "queueStatus");
-        MODULE_COMMAND_MAP.put("QueueWarning", "queueWarning");
-        MODULE_COMMAND_MAP.put("RateLimiter", "rateLimiter");
-        MODULE_COMMAND_MAP.put("Replay", "replay");
-        MODULE_COMMAND_MAP.put("ServerConnection", "serverConnection");
-        MODULE_COMMAND_MAP.put("SessionTimeLimit", "sessionTimeLimit");
-        MODULE_COMMAND_MAP.put("Spammer", "spammer");
-        MODULE_COMMAND_MAP.put("SpawnPatrol", "spawnPatrol");
-        MODULE_COMMAND_MAP.put("Spectator", "spectator");
-        MODULE_COMMAND_MAP.put("Spook", "spook");
-        MODULE_COMMAND_MAP.put("Stalk", "stalk");
-        MODULE_COMMAND_MAP.put("Tasks", "tasks");
-        MODULE_COMMAND_MAP.put("Terminal", "terminal");
-        MODULE_COMMAND_MAP.put("ViaVersion", "via");
-        MODULE_COMMAND_MAP.put("VisualRange", "visualRange");
-        MODULE_COMMAND_MAP.put("Whitelist", "whitelist");
+        // Modules with toggle command: { commandName, chineseName }
+        MODULE_CONFIG.put("AutoTotem", new String[]{"autoTotem", "自动图腾"});
+        MODULE_CONFIG.put("AutoEat", new String[]{"autoEat", "自动进食"});
+        MODULE_CONFIG.put("AutoFish", new String[]{"autoFish", "自动钓鱼"});
+        MODULE_CONFIG.put("AutoMend", new String[]{"autoMend", "自动修补"});
+        MODULE_CONFIG.put("AutoDrop", new String[]{"autoDrop", "自动丢弃"});
+        MODULE_CONFIG.put("AutoArmor", new String[]{"autoArmor", "自动装备"});
+        MODULE_CONFIG.put("AutoOmen", new String[]{"autoOmen", "自动不祥之兆"});
+        MODULE_CONFIG.put("AutoDisconnect", new String[]{"autoDisconnect", "自动断开"});
+        MODULE_CONFIG.put("AutoReconnect", new String[]{"autoReconnect", "自动重连"});
+        MODULE_CONFIG.put("AutoReply", new String[]{"autoReply", "自动回复"});
+        MODULE_CONFIG.put("AutoRespawn", new String[]{"autoRespawn", "自动重生"});
+        MODULE_CONFIG.put("AntiAFK", new String[]{"antiAFK", "防挂机"});
+        MODULE_CONFIG.put("AntiKick", new String[]{"antiKick", "防踢出"});
+        MODULE_CONFIG.put("AntiLeak", new String[]{"antiLeak", "防泄漏"});
+        MODULE_CONFIG.put("ChatHistory", new String[]{"chatHistory", "聊天记录"});
+        MODULE_CONFIG.put("ExtraChat", new String[]{"extraChat", "额外聊天"});
+        MODULE_CONFIG.put("KillAura", new String[]{"killAura", "杀戮光环"});
+        MODULE_CONFIG.put("Pathfinder", new String[]{"pathfinder", "寻路器"});
+        MODULE_CONFIG.put("Click", new String[]{"click", "点击"});
+        MODULE_CONFIG.put("Spammer", new String[]{"spammer", "刷屏"});
+        MODULE_CONFIG.put("SpawnPatrol", new String[]{"spawnPatrol", "出生巡逻"});
+        MODULE_CONFIG.put("VisualRange", new String[]{"visualRange", "可视范围"});
+        MODULE_CONFIG.put("Stalk", new String[]{"stalk", "跟踪"});
+        MODULE_CONFIG.put("Spook", new String[]{"spook", "万圣节"});
+        MODULE_CONFIG.put("Replay", new String[]{"replay", "回放"});
+        MODULE_CONFIG.put("Tasks", new String[]{"tasks", "任务"});
+        MODULE_CONFIG.put("CoordinateObfuscation", new String[]{"coordObf", "坐标混淆"});
+        MODULE_CONFIG.put("DisplayCoords", new String[]{"displayCoords", "坐标显示"});
+        MODULE_CONFIG.put("RateLimiter", new String[]{"rateLimiter", "速率限制"});
+        MODULE_CONFIG.put("SessionTimeLimit", new String[]{"sessionTimeLimit", "会话时间限制"});
+        MODULE_CONFIG.put("PacketLog", new String[]{"packetLog", "数据包日志"});
+        MODULE_CONFIG.put("QueueWarning", new String[]{"queueWarning", "队列警告"});
+        MODULE_CONFIG.put("ActiveHours", new String[]{"activeHours", "活跃时间"});
+        MODULE_CONFIG.put("ActionLimiter", new String[]{"actionLimiter", "操作限制"});
+        MODULE_CONFIG.put("ViaVersion", new String[]{"via", "版本兼容"});
+        // Modules without command: { null, chineseName }
+        MODULE_CONFIG.put("FullBright", new String[]{null, "夜视"});
+        MODULE_CONFIG.put("NoFall", new String[]{null, "无摔落"});
+        MODULE_CONFIG.put("NoSlowdown", new String[]{null, "无减速"});
+        MODULE_CONFIG.put("Sprint", new String[]{null, "自动疾跑"});
+        MODULE_CONFIG.put("ChestSteal", new String[]{null, "箱子偷窃"});
+        MODULE_CONFIG.put("InventoryCleaner", new String[]{null, "背包清理"});
+        MODULE_CONFIG.put("FastPlace", new String[]{null, "快速放置"});
+        MODULE_CONFIG.put("FastBreak", new String[]{null, "快速破坏"});
+        MODULE_CONFIG.put("FastBow", new String[]{null, "快速弓箭"});
+        MODULE_CONFIG.put("ClickTP", new String[]{null, "点击传送"});
+        MODULE_CONFIG.put("StorageESP", new String[]{null, "箱子透视"});
+        MODULE_CONFIG.put("PlayerESP", new String[]{null, "玩家透视"});
+        MODULE_CONFIG.put("EntityESP", new String[]{null, "实体透视"});
+        MODULE_CONFIG.put("ChestESP", new String[]{null, "箱子透视"});
+        MODULE_CONFIG.put("Xray", new String[]{null, "透视"});
+        MODULE_CONFIG.put("Tracers", new String[]{null, "射线"});
+        MODULE_CONFIG.put("Nametags", new String[]{null, "名牌"});
+        MODULE_CONFIG.put("ESP", new String[]{null, "透视"});
+        MODULE_CONFIG.put("Freecam", new String[]{null, "自由视角"});
+        MODULE_CONFIG.put("FakePlayer", new String[]{null, "假人"});
+        MODULE_CONFIG.put("SkinProtect", new String[]{null, "皮肤保护"});
+        MODULE_CONFIG.put("AntiVoid", new String[]{null, "防虚空"});
+        MODULE_CONFIG.put("HoleESP", new String[]{null, "安全屋透视"});
+        MODULE_CONFIG.put("Schematic", new String[]{null, "建筑方案"});
+        MODULE_CONFIG.put("Stats", new String[]{null, "统计"});
+        MODULE_CONFIG.put("Playtime", new String[]{null, "游戏时间"});
+        MODULE_CONFIG.put("Seen", new String[]{null, "最后上线"});
+        MODULE_CONFIG.put("Skin", new String[]{null, "皮肤"});
+        MODULE_CONFIG.put("Tablist", new String[]{null, "Tab列表"});
+        MODULE_CONFIG.put("Spectator", new String[]{null, "观察者"});
+        MODULE_CONFIG.put("ElytraFly", new String[]{null, "鞘翅飞行"});
+        MODULE_CONFIG.put("Scaffold", new String[]{null, "搭路"});
+        MODULE_CONFIG.put("ChestAura", new String[]{null, "箱子光环"});
+        MODULE_CONFIG.put("ClickAura", new String[]{null, "点击光环"});
+        MODULE_CONFIG.put("Raycast", new String[]{null, "射线检测"});
+        MODULE_CONFIG.put("Waypoints", new String[]{null, "路点"});
+        MODULE_CONFIG.put("Map", new String[]{null, "地图"});
+        MODULE_CONFIG.put("Multi", new String[]{null, "多开"});
+        MODULE_CONFIG.put("Database", new String[]{null, "数据库"});
+        MODULE_CONFIG.put("Theme", new String[]{null, "主题"});
+        MODULE_CONFIG.put("ChatRelay", new String[]{null, "聊天中继"});
+        MODULE_CONFIG.put("ChatSchema", new String[]{null, "聊天方案"});
+        MODULE_CONFIG.put("ChatColor", new String[]{null, "聊天颜色"});
+        MODULE_CONFIG.put("ChatFormat", new String[]{null, "聊天格式"});
+        MODULE_CONFIG.put("CommandConfig", new String[]{null, "命令配置"});
+        MODULE_CONFIG.put("ModulePriority", new String[]{null, "模块优先级"});
+        MODULE_CONFIG.put("DiscordManage", new String[]{null, "Discord管理"});
+        MODULE_CONFIG.put("DiscordNotifications", new String[]{null, "Discord通知"});
+        MODULE_CONFIG.put("ServerSwitcher", new String[]{null, "服务器切换"});
+        MODULE_CONFIG.put("Terminal", new String[]{null, "终端"});
+        MODULE_CONFIG.put("Inventory", new String[]{null, "背包"});
+        MODULE_CONFIG.put("ClientConnection", new String[]{null, "客户端连接"});
+        MODULE_CONFIG.put("ServerConnection", new String[]{null, "服务器连接"});
+        MODULE_CONFIG.put("ConnectionTest", new String[]{null, "连接测试"});
+        MODULE_CONFIG.put("ReleaseChannel", new String[]{null, "发布渠道"});
+        MODULE_CONFIG.put("License", new String[]{null, "许可"});
+        MODULE_CONFIG.put("Plugins", new String[]{null, "插件"});
+        MODULE_CONFIG.put("Update", new String[]{null, "更新"});
+        MODULE_CONFIG.put("Debug", new String[]{null, "调试"});
+        MODULE_CONFIG.put("Prio", new String[]{null, "优先权"});
+        MODULE_CONFIG.put("QueueStatus", new String[]{null, "队列状态"});
+        MODULE_CONFIG.put("SendMessage", new String[]{null, "发送消息"});
+        MODULE_CONFIG.put("TickRate", new String[]{null, "游戏刻率"});
+        MODULE_CONFIG.put("AutoUpdate", new String[]{null, "自动更新"});
+        MODULE_CONFIG.put("Whitelist", new String[]{null, "白名单"});
+        MODULE_CONFIG.put("Respawn", new String[]{null, "重生"});
     }
 
     private static class ModulesHandler implements HttpHandler {
@@ -455,7 +507,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             if ("GET".equals(method)) {
                 List<Map<String, Object>> modules = new ArrayList<>();
                 for (Module module : MODULE.getModules().toArray(new Module[0])) {
-                    modules.add(Map.of("name", module.getClass().getSimpleName(), "enabled", module.isEnabled()));
+                    String name = module.getClass().getSimpleName();
+                    String[] config = MODULE_CONFIG.get(name);
+                    if (config != null) {
+                        modules.add(Map.of("name", name, "cn", config[1], "enabled", module.isEnabled()));
+                    }
                 }
                 sendJson(exchange, modules);
             } else if ("POST".equals(method)) {
@@ -464,7 +520,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
                     String name = json.get("name").getAsString();
                     boolean enabled = json.get("enabled").getAsBoolean();
-                    String cmdName = MODULE_COMMAND_MAP.get(name);
+                    String[] config = MODULE_CONFIG.get(name);
+                    if (config == null) {
+                        sendJson(exchange, Map.of("success", false, "error", "Unknown module: " + name));
+                        return;
+                    }
+                    String cmdName = config[0];
                     if (cmdName != null) {
                         // Use command: `<cmd> on/off`
                         String cmd = cmdName + " " + (enabled ? "on" : "off");
