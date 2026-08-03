@@ -13,6 +13,7 @@ java {
 
 dependencies {
     compileOnly(files("libs/ZenithProxy.jar"))
+    implementation("io.netty:netty-all:4.1.108.Final")
 }
 
 tasks.shadowJar {
