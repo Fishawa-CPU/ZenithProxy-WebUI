@@ -249,6 +249,93 @@ body {
     background-color: var(--ctp-maroon);
 }
 
+/* ── Control Tile Grid ──────────────────────── */
+.control-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    background-color: var(--ctp-surface1);
+    border: 1px solid var(--ctp-surface1);
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.control-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px 12px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+    background-color: var(--ctp-surface0);
+    color: var(--ctp-text);
+}
+
+.control-tile:hover {
+    background-color: var(--ctp-surface1);
+}
+
+.tile-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+
+.tile-label {
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-align: center;
+}
+
+.tile-label .en {
+    display: block;
+    font-size: 0.65rem;
+    color: var(--ctp-overlay0);
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+/* Tile colors */
+.tile-connect .tile-icon {
+    background-color: rgba(166, 218, 149, 0.15);
+    color: var(--ctp-green);
+}
+.tile-connect:hover .tile-icon {
+    background-color: rgba(166, 218, 149, 0.25);
+}
+
+.tile-disconnect .tile-icon {
+    background-color: rgba(237, 135, 150, 0.15);
+    color: var(--ctp-red);
+}
+.tile-disconnect:hover .tile-icon {
+    background-color: rgba(237, 135, 150, 0.25);
+}
+
+.tile-reconnect .tile-icon {
+    background-color: rgba(238, 212, 159, 0.15);
+    color: var(--ctp-yellow);
+}
+.tile-reconnect:hover .tile-icon {
+    background-color: rgba(238, 212, 159, 0.25);
+}
+
+.tile-shutdown .tile-icon {
+    background-color: rgba(245, 169, 127, 0.15);
+    color: var(--ctp-peach);
+}
+.tile-shutdown:hover .tile-icon {
+    background-color: rgba(245, 169, 127, 0.25);
+}
+
 /* ── Dashboard ──────────────────────────────── */
 .dashboard-grid {
     display: grid;
@@ -816,6 +903,14 @@ body {
         grid-template-columns: 1fr;
     }
 
+    .control-tile-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .control-tile {
+        padding: 16px 12px;
+    }
+
     .terminal-controls {
         flex-wrap: wrap;
     }
@@ -825,6 +920,10 @@ body {
     }
 
     .stat-info h3 .en {
+        display: none;
+    }
+
+    .tile-label .en {
         display: none;
     }
 
@@ -853,6 +952,24 @@ body {
     .main-content {
         margin-left: 0;
         padding: 12px;
+    }
+
+    .control-tile-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .control-tile {
+        padding: 14px 10px;
+    }
+
+    .tile-icon {
+        width: 36px;
+        height: 36px;
+    }
+
+    .tile-icon svg {
+        width: 20px;
+        height: 20px;
     }
 
     .stat-card {

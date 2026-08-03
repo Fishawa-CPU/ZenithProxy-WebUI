@@ -555,6 +555,44 @@ async function updateWhitelistConfig() {
     showNotification('配置已保存 / Config saved', 'success');
 }
 
+// ── Server Control ────────────────────────────
+async function serverConnect() {
+    const r = await apiCall('/commands', 'POST', { command: 'connect' });
+    if (r && r.success) {
+        showNotification('正在连接服务器 / Connecting...', 'success');
+    } else {
+        showNotification('连接失败 / ' + (r?.error || 'Error'), 'error');
+    }
+}
+
+async function serverDisconnect() {
+    const r = await apiCall('/commands', 'POST', { command: 'disconnect' });
+    if (r && r.success) {
+        showNotification('已断开连接 / Disconnected', 'success');
+    } else {
+        showNotification('断开失败 / ' + (r?.error || 'Error'), 'error');
+    }
+}
+
+async function serverReconnect() {
+    const r = await apiCall('/commands', 'POST', { command: 'reconnect' });
+    if (r && r.success) {
+        showNotification('正在重连 / Reconnecting...', 'success');
+    } else {
+        showNotification('重连失败 / ' + (r?.error || 'Error'), 'error');
+    }
+}
+
+async function serverShutdown() {
+    if (!confirm('确定要关闭代理吗？ / Are you sure you want to shutdown?')) return;
+    const r = await apiCall('/commands', 'POST', { command: 'shutdown' });
+    if (r && r.success) {
+        showNotification('正在关闭 / Shutting down...', 'success');
+    } else {
+        showNotification('关闭失败 / ' + (r?.error || 'Error'), 'error');
+    }
+}
+
 // ── Utility ───────────────────────────────────
 function getPingClass(ping) {
     if (ping < 0) return '';
