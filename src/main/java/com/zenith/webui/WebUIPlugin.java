@@ -427,12 +427,26 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
             Map<String, Object> data = new LinkedHashMap<>();
             try {
-                var currentPlayer = Proxy.getInstance().getCurrentPlayer().get();
-                data.put("connected", currentPlayer != null);
-                data.put("latency", currentPlayer != null ? 0 : -1);
+                var client = Proxy.getInstance().getClient();
+                boolean connected = client != null && client.isConnected();
+                long botLatency = connected ? client.getPing() : -1;
+                data.put("connected", connected);
+                data.put("botLatency", botLatency);
+
+                // Player-to-bot latency
+                List<Map<String, Object>> players = new ArrayList<>();
+                for (var session : Proxy.getInstance().getActiveConnections().getArray()) {
+                    Map<String, Object> p = new LinkedHashMap<>();
+                    p.put("name", session.getName());
+                    p.put("uuid", session.getUUID().toString());
+                    p.put("ping", session.getPing());
+                    players.add(p);
+                }
+                data.put("players", players);
             } catch (Exception e) {
-                data.put("latency", -1);
                 data.put("connected", false);
+                data.put("botLatency", -1);
+                data.put("players", new ArrayList<>());
             }
             sendJson(exchange, data);
         }

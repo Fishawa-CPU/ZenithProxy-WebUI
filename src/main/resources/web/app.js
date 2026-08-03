@@ -162,7 +162,10 @@ function initCharts() {
     cpuChart = new Chart(document.getElementById('cpuChart'), { type: 'line', data: { labels: tl, datasets: [makeDS('CPU', chartColors.cpu, chartColors.cpuBg)] }, options: makeChartOptions('%', 100) });
     memoryChart = new Chart(document.getElementById('memoryChart'), { type: 'line', data: { labels: tl, datasets: [makeDS('Mem', chartColors.memory, chartColors.memoryBg)] }, options: makeChartOptions('%', 100) });
     networkChart = new Chart(document.getElementById('networkChart'), { type: 'line', data: { labels: tl, datasets: [makeDS('In', chartColors.netIn, chartColors.netInBg), makeDS('Out', chartColors.netOut, chartColors.netOutBg)] }, options: { ...makeChartOptions('', undefined), plugins: { ...makeChartOptions('').plugins, legend: { display: true, position: 'top', labels: { color: chartColors.text, boxWidth: 12, padding: 10, font: { size: 11 } } } } } });
-    latencyChart = new Chart(document.getElementById('latencyChart'), { type: 'line', data: { labels: tl, datasets: [makeDS('Ping', 'rgba(238,212,159,1)', 'rgba(238,212,159,0.15)')] }, options: makeChartOptions('ms', 200) });
+    latencyChart = new Chart(document.getElementById('latencyChart'), { type: 'line', data: { labels: tl, datasets: [
+        makeDS('Bot→Server', 'rgba(238,212,159,1)', 'rgba(238,212,159,0.15)'),
+        makeDS('Player→Bot', 'rgba(138,173,244,1)', 'rgba(138,173,244,0.15)')
+    ] }, options: { ...makeChartOptions('ms', 200), plugins: { ...makeChartOptions('ms', 200).plugins, legend: { display: true, position: 'top', labels: { color: chartColors.text, boxWidth: 12, padding: 10, font: { size: 11 } } } } } });
 }
 
 let systemPollTimer = null;
@@ -176,7 +179,35 @@ async function fetchSystemStats() {
     if (sys && cpuChart) { cpuChart.data.datasets[0].data.push(Math.max(0, sys.cpuLoad || 0)); cpuChart.data.labels.push(now); if (cpuChart.data.datasets[0].data.length > MAX_DATA_POINTS) { cpuChart.data.datasets[0].data.shift(); cpuChart.data.labels.shift(); } cpuChart.update('none'); }
     if (sys && memoryChart) { memoryChart.data.datasets[0].data.push(sys.memoryPercent || 0); memoryChart.data.labels.push(now); if (memoryChart.data.datasets[0].data.length > MAX_DATA_POINTS) { memoryChart.data.datasets[0].data.shift(); memoryChart.data.labels.shift(); } memoryChart.update('none'); }
     if (sys && networkChart) { networkChart.data.datasets[0].data.push(Math.round((sys.netBytesPerSecIn || 0) / 1024 * 10) / 10); networkChart.data.datasets[1].data.push(Math.round((sys.netBytesPerSecOut || 0) / 1024 * 10) / 10); networkChart.data.labels.push(now); if (networkChart.data.datasets[0].data.length > MAX_DATA_POINTS) { networkChart.data.datasets[0].data.shift(); networkChart.data.datasets[1].data.shift(); networkChart.data.labels.shift(); } networkChart.update('none'); }
-    if (lat && latencyChart) { latencyChart.data.datasets[0].data.push(lat.connected ? lat.latency : 0); latencyChart.data.labels.push(now); if (latencyChart.data.datasets[0].data.length > MAX_DATA_POINTS) { latencyChart.data.datasets[0].data.shift(); latencyChart.data.labels.shift(); } latencyChart.update('none'); }
+    if (lat && latencyChart) {
+        latencyChart.data.datasets[0].data.push(lat.connected ? (lat.botLatency || 0) : 0);
+        // Average player latency
+        let avgPlayerPing = 0;
+        if (lat.players && lat.players.length > 0) {
+            let sum = 0;
+            for (const p of lat.players) sum += (p.ping || 0);
+            avgPlayerPing = Math.round(sum / lat.players.length);
+        }
+        latencyChart.data.datasets[1].data.push(avgPlayerPing);
+        latencyChart.data.labels.push(now);
+        if (latencyChart.data.datasets[0].data.length > MAX_DATA_POINTS) {
+            latencyChart.data.datasets[0].data.shift();
+            latencyChart.data.datasets[1].data.shift();
+            latencyChart.data.labels.shift();
+        }
+        latencyChart.update('none');
+        // Update player latency detail
+        const detail = document.getElementById('latencyDetail');
+        if (detail) {
+            let html = `<div class="latency-item"><span class="player-name">Bot→Server</span><span class="ping-value ${getPingClass(lat.botLatency)}">${lat.botLatency}ms</span></div>`;
+            if (lat.players && lat.players.length > 0) {
+                for (const p of lat.players) {
+                    html += `<div class="latency-item"><span class="player-name">${p.name}</span><span class="ping-value ${getPingClass(p.ping)}">${p.ping}ms</span></div>`;
+                }
+            }
+            detail.innerHTML = html;
+        }
+    }
 }
 
 // ── Modules ───────────────────────────────────
@@ -417,6 +448,13 @@ async function loadPlayers() { const p = await apiCall('/players'); if (!p) retu
 function refreshPlayers() { loadPlayers(); }
 
 // ── Utility ───────────────────────────────────
+function getPingClass(ping) {
+    if (ping < 0) return '';
+    if (ping <= 100) return 'ping-good';
+    if (ping <= 200) return 'ping-medium';
+    return 'ping-bad';
+}
+
 function showNotification(message, type = 'info') {
     const n = document.createElement('div');
     n.textContent = message;

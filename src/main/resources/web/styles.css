@@ -925,6 +925,38 @@ body {
     }
 }
 
+/* Latency detail */
+.latency-detail {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ctp-surface1);
+    font-size: 0.75rem;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.latency-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    color: var(--ctp-subtext1);
+}
+
+.latency-item .player-name {
+    color: var(--ctp-text);
+    font-weight: 500;
+}
+
+.latency-item .ping-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+}
+
+.latency-item .ping-good { color: var(--ctp-green); }
+.latency-item .ping-medium { color: var(--ctp-yellow); }
+.latency-item .ping-bad { color: var(--ctp-red); }
+
 /* Terminal status bar */
 .terminal-statusbar {
     display: flex;
