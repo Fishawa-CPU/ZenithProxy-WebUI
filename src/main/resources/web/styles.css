@@ -150,33 +150,6 @@ body {
     border-top: 1px solid var(--border-color);
 }
 
-.status-indicator {
-    display: flex;
-    align-items: center;
-    font-size: 0.78rem;
-}
-
-.status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    margin-right: 8px;
-    flex-shrink: 0;
-}
-
-.status-dot.connected {
-    background-color: var(--ctp-green);
-}
-
-.status-dot.disconnected {
-    background-color: var(--ctp-overlay0);
-}
-
-.status-text {
-    color: var(--ctp-overlay1);
-    font-size: 0.78rem;
-}
-
 /* ── Main Content ───────────────────────────── */
 .main-content {
     flex: 1;

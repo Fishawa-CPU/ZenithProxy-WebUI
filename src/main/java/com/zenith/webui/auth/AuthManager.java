@@ -3,64 +3,62 @@ package com.zenith.webui.auth;
 import com.zenith.webui.config.WebUIConfig;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class AuthManager {
     private static final ComponentLogger LOG = ComponentLogger.logger("WebUI-Auth");
-    private static final String HMAC_ALGORITHM = "HmacSHA256";
+    private static final int MAX_ATTEMPTS_PER_MINUTE = 5;
+    private static final long RATE_LIMIT_WINDOW_MS = 60_000;
 
     private final WebUIConfig.AuthConfig config;
-    private final String secretKey;
     private final Map<String, TokenInfo> tokens = new ConcurrentHashMap<>();
-    private final Map<String, Long> rateLimitMap = new ConcurrentHashMap<>();
+    // Rate limit: key = "ip:minute_timestamp"
+    private final Map<String, Integer> rateLimitMap = new ConcurrentHashMap<>();
+    private long lastRateLimitCleanup = System.currentTimeMillis();
 
     public AuthManager(WebUIConfig.AuthConfig config) {
         this.config = config;
-        this.secretKey = config.secretKey.isEmpty() ? generateSecretKey() : config.secretKey;
         LOG.info("Auth manager initialized, token expiry: {}ms", config.tokenExpiry);
     }
 
-    private String generateSecretKey() {
-        byte[] key = new byte[32];
-        new SecureRandom().nextBytes(key);
-        return Base64.getEncoder().encodeToString(key);
-    }
-
     /**
-     * Authenticate user with username and password
-     * @return JWT token if successful, null otherwise
+     * Authenticate user with username and password, rate-limited by IP
+     * @return token if successful, null otherwise
      */
-    public String authenticate(String username, String password) {
-        if (username == null || password == null) return null;
+    public String authenticate(String username, String password, String clientIp) {
+        if (username == null || password == null || clientIp == null) return null;
 
-        // Rate limiting: max 5 attempts per minute
-        String rateKey = username + ":" + (System.currentTimeMillis() / 60000);
-        Long attempts = rateLimitMap.get(rateKey);
-        if (attempts != null && attempts >= 5) {
-            LOG.warn("Rate limit exceeded for user: {}", username);
+        cleanupRateLimitIfNeeded();
+
+        // IP-based rate limiting
+        String rateKey = clientIp + ":" + (System.currentTimeMillis() / RATE_LIMIT_WINDOW_MS);
+        Integer attempts = rateLimitMap.get(rateKey);
+        if (attempts != null && attempts >= MAX_ATTEMPTS_PER_MINUTE) {
+            LOG.warn("Rate limit exceeded for IP: {}", clientIp);
             return null;
         }
-        rateLimitMap.put(rateKey, attempts != null ? attempts + 1 : 1L);
+        rateLimitMap.put(rateKey, attempts != null ? attempts + 1 : 1);
 
-        if (config.username.equals(username) && config.password.equals(password)) {
+        // Constant-time credential comparison
+        if (constantTimeEquals(config.username, username) && constantTimeEquals(config.password, password)) {
             String token = generateToken(username);
             LOG.info("User authenticated: {}", username);
             return token;
         }
 
-        LOG.warn("Authentication failed for user: {}", username);
+        LOG.warn("Authentication failed for user: {} from IP: {}", username, clientIp);
         return null;
     }
 
     /**
-     * Validate JWT token
+     * Validate token
      * @return Username if valid, null otherwise
      */
     public String validateToken(String token) {
@@ -78,7 +76,7 @@ public class AuthManager {
     }
 
     /**
-     * Invalidate token (logout)
+     * Invalidate a specific token (logout)
      */
     public void invalidateToken(String token) {
         if (token != null) {
@@ -86,17 +84,52 @@ public class AuthManager {
         }
     }
 
+    /**
+     * Invalidate all tokens for a given username (e.g., on password change)
+     */
+    public void invalidateAllTokensForUser(String username) {
+        if (username == null) return;
+        tokens.entrySet().removeIf(e -> username.equals(e.getValue().username));
+        LOG.info("All tokens invalidated for user: {}", username);
+    }
+
+    /**
+     * Constant-time string comparison to prevent timing attacks
+     */
+    private static boolean constantTimeEquals(String a, String b) {
+        if (a == null || b == null) return false;
+        byte[] aBytes = a.getBytes(StandardCharsets.UTF_8);
+        byte[] bBytes = b.getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(aBytes, bBytes);
+    }
+
     private String generateToken(String username) {
         String token = UUID.randomUUID().toString();
         long expiry = System.currentTimeMillis() + config.tokenExpiry;
         tokens.put(token, new TokenInfo(username, expiry));
 
-        // Cleanup old tokens periodically
-        if (tokens.size() > 1000) {
+        // Cleanup expired tokens periodically
+        if (tokens.size() > 100) {
             tokens.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expiry);
         }
 
         return token;
+    }
+
+    private void cleanupRateLimitIfNeeded() {
+        long now = System.currentTimeMillis();
+        if (now - lastRateLimitCleanup < RATE_LIMIT_WINDOW_MS * 2) return;
+        lastRateLimitCleanup = now;
+        long cutoff = now - RATE_LIMIT_WINDOW_MS * 2;
+        // Remove entries older than 2 windows by parsing minute timestamp from key
+        rateLimitMap.entrySet().removeIf(entry -> {
+            try {
+                long minuteTs = Long.parseLong(entry.getKey().substring(entry.getKey().lastIndexOf(':') + 1));
+                return minuteTs * RATE_LIMIT_WINDOW_MS < cutoff;
+            } catch (Exception e) {
+                return true;
+            }
+        });
     }
 
     private static class TokenInfo {

@@ -27,11 +27,10 @@ async function logout() {
             method: 'POST',
             credentials: 'include'
         });
-        localStorage.removeItem('webui_token');
-        window.location.href = '/login.html';
     } catch (e) {
-        window.location.href = '/login.html';
+        // ignore
     }
+    window.location.href = '/login.html';
 }
 
 let logs = [];
@@ -321,7 +320,7 @@ async function fetchSystemStats() {
             let html = `<div class="latency-item"><span class="player-name">Bot→Server</span><span class="ping-value ${getPingClass(lat.botLatency)}">${lat.botLatency}ms</span></div>`;
             if (lat.players && lat.players.length > 0) {
                 for (const p of lat.players) {
-                    html += `<div class="latency-item"><span class="player-name">${p.name}</span><span class="ping-value ${getPingClass(p.ping)}">${p.ping}ms</span></div>`;
+                    html += `<div class="latency-item"><span class="player-name">${escapeHtml(p.name)}</span><span class="ping-value ${getPingClass(p.ping)}">${escapeHtml(String(p.ping))}ms</span></div>`;
                 }
             }
             detail.innerHTML = html;
@@ -482,7 +481,7 @@ function addLogEntry(log) {
     const entry = document.createElement('div');
     entry.className = 'terminal-line terminal-line-log';
     const ts = new Date(log.timestamp).toLocaleTimeString();
-    entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${log.level.toLowerCase()}">${log.level}</span><span class="log-msg">[${log.logger}] ${log.message}</span>`;
+    entry.innerHTML = `<span class="log-ts">${escapeHtml(ts)}</span><span class="log-lv ${escapeHtml(log.level.toLowerCase())}">${escapeHtml(log.level)}</span><span class="log-msg">[${escapeHtml(log.logger)}] ${escapeHtml(log.message)}</span>`;
     output.appendChild(entry);
     if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
     while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);

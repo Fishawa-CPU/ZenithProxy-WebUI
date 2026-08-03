@@ -1,10 +1,14 @@
 package com.zenith.webui.auth;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
+
+import java.nio.charset.StandardCharsets;
 
 /**
  * Handles authentication checks for incoming requests
@@ -31,10 +35,12 @@ public class AuthHandler {
      */
     public boolean checkAuth(FullHttpRequest request) {
         String path = request.uri();
+        // Strip query string for path matching
+        if (path.contains("?")) path = path.substring(0, path.indexOf('?'));
 
         // Check public paths
         for (String publicPath : PUBLIC_PATHS) {
-            if (path.startsWith(publicPath)) {
+            if (path.equals(publicPath)) {
                 return true;
             }
         }
@@ -50,6 +56,21 @@ public class AuthHandler {
 
         // Validate token
         return authManager.validateToken(token) != null;
+    }
+
+    /**
+     * Validate that a file path stays within allowed directories
+     * @return true if path is safe, false if traversal detected
+     */
+    public static boolean isSafePath(String path) {
+        if (path == null) return false;
+        // Normalize and check for traversal
+        String normalized = path.replace("\\", "/");
+        if (normalized.contains("..") || normalized.contains("//")) return false;
+        if (normalized.contains("\0")) return false;
+        // Must start with / and not contain drive letters (Windows)
+        if (!normalized.startsWith("/")) return false;
+        return true;
     }
 
     /**
@@ -84,16 +105,17 @@ public class AuthHandler {
     }
 
     /**
-     * Send unauthorized response
+     * Send unauthorized response (safe from JSON injection)
      */
     public static void sendUnauthorized(ChannelHandlerContext ctx, String message) {
+        JsonObject json = new JsonObject();
+        json.add("error", new JsonPrimitive(message));
+        json.add("code", new JsonPrimitive(401));
+        byte[] bytes = json.toString().getBytes(StandardCharsets.UTF_8);
+
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.UNAUTHORIZED);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.WWW_AUTHENTICATE, "Bearer realm=\"webui\"");
-
-        String json = "{\"error\":\"" + message + "\",\"code\":401}";
-        byte[] bytes = json.getBytes(CharsetUtil.UTF_8);
-
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
         ctx.write(response);
         ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(bytes)));

@@ -217,8 +217,6 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Store token in localStorage as backup
-                    localStorage.setItem('webui_token', data.token);
                     window.location.href = '/';
                 } else {
                     showError(data.error || '登录失败');

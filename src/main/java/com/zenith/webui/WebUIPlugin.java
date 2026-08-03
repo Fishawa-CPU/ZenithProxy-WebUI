@@ -438,7 +438,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
     private void handleConfig(ChannelHandlerContext ctx, FullHttpRequest req) {
         if (HttpMethod.GET.equals(req.method())) {
-            sendJson(ctx, CONFIG);
+            // Return config without sensitive fields
+            com.google.gson.JsonObject configJson = GSON.toJsonTree(CONFIG).getAsJsonObject();
+            if (configJson.has("authentication")) {
+                com.google.gson.JsonObject auth = configJson.getAsJsonObject("authentication");
+                auth.remove("password");
+                auth.addProperty("password", "");
+            }
+            sendJson(ctx, configJson);
         } else if (HttpMethod.POST.equals(req.method())) {
             try {
                 String body = req.content().toString(CharsetUtil.UTF_8);
@@ -458,6 +465,15 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     root.add(entry.getKey(), entry.getValue());
                 }
                 Files.writeString(configPath, GSON.toJson(root));
+
+                // Invalidate all tokens if password was changed
+                if (incoming.has("authentication")) {
+                    com.google.gson.JsonObject auth = incoming.getAsJsonObject("authentication");
+                    if (auth.has("password")) {
+                        authManager.invalidateAllTokensForUser(CONFIG.authentication.username);
+                    }
+                }
+
                 sendJson(ctx, Map.of("success", true, "restartRequired", true));
             } catch (Exception e) {
                 sendJson(ctx, Map.of("success", false, "error", e.getMessage()));
@@ -475,7 +491,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         } else if (HttpMethod.POST.equals(req.method())) {
             try {
                 String body = req.content().toString(CharsetUtil.UTF_8);
-                String command = body.replaceAll(".*\"command\"\\s*:\\s*\"", "").replaceAll("\".*", "");
+                com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
+                String command = json != null && json.has("command") ? json.get("command").getAsString() : "";
                 CommandContext context = CommandContext.create(command, CommandSources.TERMINAL);
                 COMMAND.execute(context);
 
@@ -577,8 +594,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream");
         response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
         response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        ctx.write(response);
+        ctx.writeAndFlush(response);
 
         sseClients.add(ctx.channel());
     }
@@ -772,6 +788,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private void handleStaticFile(ChannelHandlerContext ctx, String path) {
         if ("/".equals(path)) path = "/index.html";
 
+        // Path traversal prevention
+        if (!AuthHandler.isSafePath(path)) {
+            sendNotFound(ctx);
+            return;
+        }
+
         // Try classpath first
         byte[] content = loadResource(path);
         if (content == null) {
@@ -831,7 +853,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             response.headers().set(HttpHeaderNames.CONTENT_TYPE, ct);
             response.headers().set(HttpHeaderNames.CONTENT_LENGTH, fileSize);
             response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
-            response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
             ctx.write(response);
 
             // Use FileRegion for zero-copy transfer
@@ -854,7 +875,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.length);
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.write(response);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
@@ -877,7 +897,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         HttpResponse httpResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
         httpResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         httpResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        httpResponse.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.write(httpResponse);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);

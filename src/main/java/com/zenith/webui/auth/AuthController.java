@@ -4,10 +4,12 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
 
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
@@ -25,7 +27,6 @@ public class AuthController {
     /**
      * Handle login request
      * POST /api/auth/login
-     * Body: {"username": "admin", "password": "admin"}
      */
     public void handleLogin(ChannelHandlerContext ctx, FullHttpRequest request) {
         try {
@@ -40,16 +41,16 @@ public class AuthController {
 
             String username = json.get("username").getAsString();
             String password = json.get("password").getAsString();
+            String clientIp = getClientIp(ctx, request);
 
-            String token = authManager.authenticate(username, password);
+            String token = authManager.authenticate(username, password, clientIp);
             if (token != null) {
                 JsonObject response = new JsonObject();
                 response.addProperty("success", true);
-                response.addProperty("token", token);
                 response.addProperty("username", username);
+                // Token is only set via HttpOnly cookie, NOT in response body
 
-                // Set cookie
-                String cookie = String.format("webui_token=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400", token);
+                String cookie = buildCookie(token, 86400);
                 sendJsonWithCookie(ctx, HttpResponseStatus.OK, response, cookie);
             } else {
                 sendJson(ctx, HttpResponseStatus.UNAUTHORIZED,
@@ -63,7 +64,6 @@ public class AuthController {
 
     /**
      * Handle logout request
-     * POST /api/auth/logout
      */
     public void handleLogout(ChannelHandlerContext ctx, FullHttpRequest request) {
         String token = extractToken(request);
@@ -71,15 +71,13 @@ public class AuthController {
             authManager.invalidateToken(token);
         }
 
-        // Clear cookie
-        String cookie = "webui_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+        String cookie = buildCookie("", 0);
         sendJsonWithCookie(ctx, HttpResponseStatus.OK,
             Map.of("success", true), cookie);
     }
 
     /**
      * Handle check auth status
-     * GET /api/auth/status
      */
     public void handleStatus(ChannelHandlerContext ctx, FullHttpRequest request) {
         String token = extractToken(request);
@@ -94,26 +92,49 @@ public class AuthController {
         }
     }
 
+    private String getClientIp(ChannelHandlerContext ctx, FullHttpRequest request) {
+        // Check X-Forwarded-For first (for reverse proxies)
+        String xff = request.headers().get("X-Forwarded-For");
+        if (xff != null && !xff.isEmpty()) {
+            return xff.split(",")[0].trim();
+        }
+        String xri = request.headers().get("X-Real-IP");
+        if (xri != null && !xri.isEmpty()) {
+            return xri;
+        }
+        Channel channel = ctx.channel();
+        if (channel.remoteAddress() instanceof InetSocketAddress addr) {
+            return addr.getAddress().getHostAddress();
+        }
+        return "unknown";
+    }
+
     private String extractToken(FullHttpRequest request) {
-        // Try cookie first
         String cookieHeader = request.headers().get(HttpHeaderNames.COOKIE);
         if (cookieHeader != null) {
             String[] cookies = cookieHeader.split(";");
             for (String cookie : cookies) {
-                String[] parts = cookie.trim().split("=");
+                String[] parts = cookie.trim().split("=", 2);
                 if (parts.length == 2 && "webui_token".equals(parts[0].trim())) {
                     return parts[1].trim();
                 }
             }
         }
 
-        // Try Authorization header
         String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             return authHeader.substring(7);
         }
 
         return null;
+    }
+
+    private String buildCookie(String token, int maxAge) {
+        if (maxAge > 0) {
+            return String.format("webui_token=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d",
+                token, maxAge);
+        }
+        return "webui_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
     }
 
     private void sendJson(ChannelHandlerContext ctx, HttpResponseStatus status, Object obj) {
@@ -123,7 +144,6 @@ public class AuthController {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 
         ctx.write(response);
         ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(bytes)));
@@ -138,7 +158,6 @@ public class AuthController {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         response.headers().set(HttpHeaderNames.SET_COOKIE, cookie);
 
         ctx.write(response);
