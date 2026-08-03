@@ -141,7 +141,7 @@ async function fetchLogs() {
 
 // ── Dashboard ─────────────────────────────────
 async function loadDashboard() {
-    const [s, p, pl] = await Promise.all([apiCall('/status'), apiCall('/players'), apiCall('/player')]);
+    const [s, p, pl, q] = await Promise.all([apiCall('/status'), apiCall('/players'), apiCall('/player'), apiCall('/queue')]);
     if (!s) return;
     document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
     document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
@@ -149,10 +149,20 @@ async function loadDashboard() {
     document.getElementById('proxyAddress').textContent = s.proxyAddress || '-';
     document.getElementById('mcVersion').textContent = s.version || '-';
 
+    // Queue display
+    const titleText = document.getElementById('titleText');
+    if (q && q.inQueue) {
+        titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入队列';
+        titleText.style.color = 'var(--ctp-yellow)';
+    } else {
+        titleText.textContent = '-';
+        titleText.style.color = 'var(--ctp-overlay1)';
+    }
+
     // Player health/food display
     const statsEl = document.getElementById('playerStats');
     if (pl && pl.connected && pl.health !== null) {
-        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">HP ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">FOOD ${pl.food}/20</span>`;
+        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">HP ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">饱 ${pl.food}/20</span>`;
     } else {
         statsEl.textContent = '-';
         statsEl.style.color = 'var(--ctp-overlay1)';
@@ -225,8 +235,20 @@ function stopSystemPolling() { if (systemPollTimer) { clearInterval(systemPollTi
 
 async function fetchSystemStats() {
     if (currentPage !== 'dashboard') { stopSystemPolling(); return; }
-    const [sys, lat] = await Promise.all([apiCall('/system'), apiCall('/latency')]);
+    const [sys, lat, q] = await Promise.all([apiCall('/system'), apiCall('/latency'), apiCall('/queue')]);
     const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // Update queue display
+    const titleText = document.getElementById('titleText');
+    if (titleText) {
+        if (q && q.inQueue) {
+            titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入队列';
+            titleText.style.color = 'var(--ctp-yellow)';
+        } else {
+            titleText.textContent = '-';
+            titleText.style.color = 'var(--ctp-overlay1)';
+        }
+    }
     if (sys && cpuChart) { cpuChart.data.datasets[0].data.push(Math.max(0, sys.cpuLoad || 0)); cpuChart.data.labels.push(now); if (cpuChart.data.datasets[0].data.length > MAX_DATA_POINTS) { cpuChart.data.datasets[0].data.shift(); cpuChart.data.labels.shift(); } cpuChart.update('none'); }
     if (sys && memoryChart) { memoryChart.data.datasets[0].data.push(sys.memoryPercent || 0); memoryChart.data.labels.push(now); if (memoryChart.data.datasets[0].data.length > MAX_DATA_POINTS) { memoryChart.data.datasets[0].data.shift(); memoryChart.data.labels.shift(); } memoryChart.update('none'); }
     if (sys && networkChart) { networkChart.data.datasets[0].data.push(Math.round((sys.netBytesPerSecIn || 0) / 1024 * 10) / 10); networkChart.data.datasets[1].data.push(Math.round((sys.netBytesPerSecOut || 0) / 1024 * 10) / 10); networkChart.data.labels.push(now); if (networkChart.data.datasets[0].data.length > MAX_DATA_POINTS) { networkChart.data.datasets[0].data.shift(); networkChart.data.datasets[1].data.shift(); networkChart.data.labels.shift(); } networkChart.update('none'); }
