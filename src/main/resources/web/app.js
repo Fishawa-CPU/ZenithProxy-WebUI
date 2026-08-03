@@ -1,5 +1,7 @@
 // ZenithProxy Web UI JavaScript
 
+let currentUsername = 'root';
+
 // Auth check
 (async function checkAuth() {
     try {
@@ -9,11 +11,17 @@
             window.location.href = '/login.html';
             return;
         }
+        currentUsername = data.username || 'root';
         // Show user info
         const userInfo = document.getElementById('userInfo');
         if (userInfo) {
             userInfo.style.display = 'block';
         }
+        // Update terminal username
+        const terminalUsername = document.getElementById('terminalUsername');
+        const terminalPromptUser = document.getElementById('terminalPromptUser');
+        if (terminalUsername) terminalUsername.textContent = currentUsername;
+        if (terminalPromptUser) terminalPromptUser.textContent = currentUsername;
     } catch (e) {
         window.location.href = '/login.html';
     }
@@ -123,9 +131,17 @@ function navigateTo(page) {
     switch (page) {
         case 'dashboard': loadDashboard(); initCharts(); startSystemPolling(); break;
         case 'config': loadConfig(); break;
+        case 'terminal': scrollTerminalToBottom(); break;
         case 'players': loadPlayers(); loadWhitelist(); break;
     }
     if (page !== 'dashboard') stopSystemPolling();
+}
+
+function scrollTerminalToBottom() {
+    const output = document.getElementById('terminalOutput');
+    if (output) {
+        output.scrollTop = output.scrollHeight;
+    }
 }
 
 // ── API ───────────────────────────────────────
@@ -424,7 +440,7 @@ async function sendTerminalCommand(command) {
     historyIndex = -1;
     terminalCmdCount++;
     updateTerminalCounts();
-    appendTerminalLine(`root@zenith:~$ ${command}`, 'terminal-line-command');
+    appendTerminalLine(`${currentUsername}@zenith:~$ ${command}`, 'terminal-line-command');
 
     const result = await apiCall('/commands', 'POST', { command });
     if (result) {
@@ -513,8 +529,8 @@ let terminalLogCountDisplay = 0;
 function updateTerminalCounts() {
     const cmdEl = document.getElementById('terminalCmdCount');
     const logEl = document.getElementById('terminalLogCount');
-    if (cmdEl) cmdEl.textContent = `命令数: ${terminalCmdCount}`;
-    if (logEl) logEl.textContent = `日志数: ${terminalLogCount}`;
+    if (cmdEl) cmdEl.textContent = `命令: ${terminalCmdCount}`;
+    if (logEl) logEl.textContent = `日志: ${terminalLogCount}`;
 }
 
 function updateTerminalStatus() {

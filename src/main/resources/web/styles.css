@@ -150,57 +150,26 @@ body {
     border-top: 1px solid var(--border-color);
 }
 
-.logout-tile {
+.logout-btn {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 6px;
     width: 100%;
-    padding: 12px 8px;
+    padding: 8px;
     border: none;
+    border-radius: 4px;
     cursor: pointer;
     transition: all 0.15s ease;
     font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 500;
     background-color: var(--ctp-surface0);
     color: var(--ctp-red);
 }
 
-.logout-tile:hover {
+.logout-btn:hover {
     background-color: var(--ctp-red);
-    color: var(--ctp-crust);
-}
-
-.logout-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background-color: rgba(237, 135, 150, 0.15);
-    border-radius: 6px;
-    transition: all 0.15s ease;
-}
-
-.logout-tile:hover .logout-icon {
-    background-color: rgba(17, 17, 27, 0.2);
-}
-
-.logout-label {
-    font-size: 0.82rem;
-    font-weight: 500;
-    text-align: center;
-}
-
-.logout-label .en {
-    display: block;
-    font-size: 0.65rem;
-    color: var(--ctp-overlay0);
-    font-weight: 400;
-    margin-top: 2px;
-}
-
-.logout-tile:hover .logout-label .en {
     color: var(--ctp-crust);
 }
 
@@ -556,7 +525,16 @@ body {
 }
 
 /* ── Terminal ───────────────────────────────── */
+#terminal {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 48px);
+}
+
 .terminal-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
     background-color: var(--ctp-crust);
     font-family: 'JetBrains Mono', 'Menlo', 'Ubuntu Mono', monospace;
     overflow: hidden;
@@ -566,10 +544,23 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 16px;
+    padding: 6px 12px;
     background-color: var(--ctp-mantle);
     border-bottom: 1px solid var(--ctp-surface1);
     font-size: 0.78rem;
+    gap: 8px;
+}
+
+.terminal-title-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.terminal-title-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .terminal-title {
@@ -582,8 +573,13 @@ body {
     font-size: 0.72rem;
 }
 
+.terminal-counter {
+    color: var(--ctp-overlay0);
+    font-size: 0.72rem;
+}
+
 .terminal-output {
-    height: 560px;
+    flex: 1;
     overflow-y: auto;
     padding: 16px;
     scroll-behavior: smooth;
@@ -1062,24 +1058,6 @@ body {
 .latency-item .ping-good { color: var(--ctp-green); }
 .latency-item .ping-medium { color: var(--ctp-yellow); }
 .latency-item .ping-bad { color: var(--ctp-red); }
-
-/* Terminal status bar */
-.terminal-statusbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 16px;
-    background-color: var(--ctp-mantle);
-    border-top: 1px solid var(--ctp-surface1);
-    font-size: 0.7rem;
-    color: var(--ctp-overlay0);
-}
-
-.terminal-statusbar span {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
 
 /* Terminal command separator */
 .terminal-line-command::before {
