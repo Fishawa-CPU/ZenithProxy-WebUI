@@ -391,6 +391,110 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
+    // Module class name -> command name mapping
+    private static final Map<String, String> MODULE_COMMAND_MAP = new LinkedHashMap<>();
+    static {
+        MODULE_COMMAND_MAP.put("AutoTotem", "autoTotem");
+        MODULE_COMMAND_MAP.put("AutoEat", "autoEat");
+        MODULE_COMMAND_MAP.put("AutoFish", "autoFish");
+        MODULE_COMMAND_MAP.put("AutoMend", "autoMend");
+        MODULE_COMMAND_MAP.put("AutoDrop", "autoDrop");
+        MODULE_COMMAND_MAP.put("AutoArmor", "autoArmor");
+        MODULE_COMMAND_MAP.put("AutoOmen", "autoOmen");
+        MODULE_COMMAND_MAP.put("AutoDisconnect", "autoDisconnect");
+        MODULE_COMMAND_MAP.put("AutoReconnect", "autoReconnect");
+        MODULE_COMMAND_MAP.put("AutoReply", "autoReply");
+        MODULE_COMMAND_MAP.put("AutoRespawn", "autoRespawn");
+        MODULE_COMMAND_MAP.put("AutoUpdate", "autoUpdate");
+        MODULE_COMMAND_MAP.put("AntiAFK", "antiAFK");
+        MODULE_COMMAND_MAP.put("AntiKick", "antiKick");
+        MODULE_COMMAND_MAP.put("AntiLeak", "antiLeak");
+        MODULE_COMMAND_MAP.put("ChatRelay", "chatRelay");
+        MODULE_COMMAND_MAP.put("ChatHistory", "chatHistory");
+        MODULE_COMMAND_MAP.put("ExtraChat", "extraChat");
+        MODULE_COMMAND_MAP.put("ChatSchema", "chatSchema");
+        MODULE_COMMAND_MAP.put("ChatColor", "chatColor");
+        MODULE_COMMAND_MAP.put("ChatFormat", "chatFormat");
+        MODULE_COMMAND_MAP.put("KillAura", "killAura");
+        MODULE_COMMAND_MAP.put("Pathfinder", "pathfinder");
+        MODULE_COMMAND_MAP.put("ClickAura", "clickAura");
+        MODULE_COMMAND_MAP.put("ChestAura", "chestAura");
+        MODULE_COMMAND_MAP.put("Scaffold", "scaffold");
+        MODULE_COMMAND_MAP.put("ElytraFly", "elytraFly");
+        MODULE_COMMAND_MAP.put("NoFall", "noFall");
+        MODULE_COMMAND_MAP.put("NoSlowdown", "noSlowdown");
+        MODULE_COMMAND_MAP.put("Sprint", "sprint");
+        MODULE_COMMAND_MAP.put("FullBright", "fullBright");
+        MODULE_COMMAND_MAP.put("ChestSteal", "chestSteal");
+        MODULE_COMMAND_MAP.put("InventoryCleaner", "inventoryCleaner");
+        MODULE_COMMAND_MAP.put("FastPlace", "fastPlace");
+        MODULE_COMMAND_MAP.put("FastBreak", "fastBreak");
+        MODULE_COMMAND_MAP.put("FastBow", "fastBow");
+        MODULE_COMMAND_MAP.put("ClickTP", "clickTP");
+        MODULE_COMMAND_MAP.put("StorageESP", "storageESP");
+        MODULE_COMMAND_MAP.put("PlayerESP", "playerESP");
+        MODULE_COMMAND_MAP.put("EntityESP", "entityESP");
+        MODULE_COMMAND_MAP.put("ChestESP", "chestESP");
+        MODULE_COMMAND_MAP.put("Xray", "xray");
+        MODULE_COMMAND_MAP.put("Tracers", "tracers");
+        MODULE_COMMAND_MAP.put("Nametags", "nametags");
+        MODULE_COMMAND_MAP.put("ESP", "esp");
+        MODULE_COMMAND_MAP.put("Freecam", "freecam");
+        MODULE_COMMAND_MAP.put("FakePlayer", "fakePlayer");
+        MODULE_COMMAND_MAP.put("SkinProtect", "skinProtect");
+        MODULE_COMMAND_MAP.put("AntiVoid", "antiVoid");
+        MODULE_COMMAND_MAP.put("HoleESP", "holeESP");
+        MODULE_COMMAND_MAP.put("Schematic", "schematic");
+        MODULE_COMMAND_MAP.put("Replay", "replay");
+        MODULE_COMMAND_MAP.put("Stats", "stats");
+        MODULE_COMMAND_MAP.put("Playtime", "playtime");
+        MODULE_COMMAND_MAP.put("SessionTimeLimit", "sessionTimeLimit");
+        MODULE_COMMAND_MAP.put("Seen", "seen");
+        MODULE_COMMAND_MAP.put("Skin", "skin");
+        MODULE_COMMAND_MAP.put("Tablist", "tablist");
+        MODULE_COMMAND_MAP.put("Spectator", "spectator");
+        MODULE_COMMAND_MAP.put("Spook", "spook");
+        MODULE_COMMAND_MAP.put("Stalk", "stalk");
+        MODULE_COMMAND_MAP.put("SpawnPatrol", "spawnPatrol");
+        MODULE_COMMAND_MAP.put("VisualRange", "visualRange");
+        MODULE_COMMAND_MAP.put("Spammer", "spammer");
+        MODULE_COMMAND_MAP.put("SendMessage", "sendMessage");
+        MODULE_COMMAND_MAP.put("RateLimiter", "rateLimiter");
+        MODULE_COMMAND_MAP.put("TickRate", "tickRate");
+        MODULE_COMMAND_MAP.put("QueueStatus", "queueStatus");
+        MODULE_COMMAND_MAP.put("QueueWarning", "queueWarning");
+        MODULE_COMMAND_MAP.put("Prio", "prio");
+        MODULE_COMMAND_MAP.put("ActiveHours", "activeHours");
+        MODULE_COMMAND_MAP.put("ConnectionTest", "connectionTest");
+        MODULE_COMMAND_MAP.put("ClientConnection", "clientConnection");
+        MODULE_COMMAND_MAP.put("ServerConnection", "serverConnection");
+        MODULE_COMMAND_MAP.put("PacketLog", "packetLog");
+        MODULE_COMMAND_MAP.put("DisplayCoords", "displayCoords");
+        MODULE_COMMAND_MAP.put("CoordinateObfuscation", "coordObf");
+        MODULE_COMMAND_MAP.put("CommandConfig", "commandConfig");
+        MODULE_COMMAND_MAP.put("ModulePriority", "modulePriority");
+        MODULE_COMMAND_MAP.put("ActionLimiter", "actionLimiter");
+        MODULE_COMMAND_MAP.put("DiscordManage", "discord");
+        MODULE_COMMAND_MAP.put("DiscordNotifications", "discordNotifications");
+        MODULE_COMMAND_MAP.put("ServerSwitcher", "switch");
+        MODULE_COMMAND_MAP.put("Map", "map");
+        MODULE_COMMAND_MAP.put("Multi", "multi");
+        MODULE_COMMAND_MAP.put("Terminal", "terminal");
+        MODULE_COMMAND_MAP.put("Database", "database");
+        MODULE_COMMAND_MAP.put("Theme", "theme");
+        MODULE_COMMAND_MAP.put("Inventory", "inventory");
+        MODULE_COMMAND_MAP.put("Click", "click");
+        MODULE_COMMAND_MAP.put("Respawn", "respawn");
+        MODULE_COMMAND_MAP.put("Raycast", "raycast");
+        MODULE_COMMAND_MAP.put("Tasks", "tasks");
+        MODULE_COMMAND_MAP.put("Waypoints", "waypoints");
+        MODULE_COMMAND_MAP.put("ViaVersion", "via");
+        MODULE_COMMAND_MAP.put("ReleaseChannel", "channel");
+        MODULE_COMMAND_MAP.put("License", "license");
+        MODULE_COMMAND_MAP.put("Plugins", "plugins");
+        MODULE_COMMAND_MAP.put("Update", "update");
+    }
+
     private static class ModulesHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
@@ -408,8 +512,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
                     String name = json.get("name").getAsString();
                     boolean enabled = json.get("enabled").getAsBoolean();
-                    // Use command to enable/disable module
-                    String cmd = name.toLowerCase() + (enabled ? " enable" : " disable");
+                    String cmdName = MODULE_COMMAND_MAP.get(name);
+                    if (cmdName == null) {
+                        sendJson(exchange, Map.of("success", false, "error", "No command mapping for: " + name));
+                        return;
+                    }
+                    String cmd = cmdName + (enabled ? " enable" : " disable");
                     CommandContext context = CommandContext.create(cmd, CommandSources.TERMINAL);
                     COMMAND.execute(context);
                     saveModuleState(name, enabled);
