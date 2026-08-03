@@ -408,20 +408,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
                     String name = json.get("name").getAsString();
                     boolean enabled = json.get("enabled").getAsBoolean();
-                    boolean found = false;
-                    for (Module module : MODULE.getModules().toArray(new Module[0])) {
-                        if (module.getClass().getSimpleName().equals(name)) {
-                            module.setEnabled(enabled);
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        saveModuleState(name, enabled);
-                        sendJson(exchange, Map.of("success", true));
-                    } else {
-                        sendJson(exchange, Map.of("success", false, "error", "Module not found: " + name));
-                    }
+                    // Use command to enable/disable module
+                    String cmd = name.toLowerCase() + (enabled ? " enable" : " disable");
+                    CommandContext context = CommandContext.create(cmd, CommandSources.TERMINAL);
+                    COMMAND.execute(context);
+                    saveModuleState(name, enabled);
+                    sendJson(exchange, Map.of("success", true));
                 } catch (Exception e) {
                     sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
                 }
