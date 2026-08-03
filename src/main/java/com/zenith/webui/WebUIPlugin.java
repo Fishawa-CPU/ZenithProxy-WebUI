@@ -28,7 +28,6 @@ import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.ArrayList;
@@ -426,7 +425,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 }
                 switch (path) {
                     case "/api/commands" -> handleCommands(ctx, req);
-                    case "/api/logs" -> handleLogsFile(ctx, query);
                     case "/api/logs/stream" -> handleLogStream(ctx);
                     case "/api/dashboard" -> handleDashboard(ctx);
                     case "/api/dashboard/stream" -> handleDashboardStream(ctx);
@@ -547,52 +545,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
         // Other servers: no queue detection yet, leave empty for future expansion
         return new QueueData(false, 0, 0, "");
-    }
-
-    private void handleLogsFile(ChannelHandlerContext ctx, String query) {
-        if (query != null && query.contains("file=")) {
-            String fileName = query.replace("file=", "").trim();
-            if (fileName.contains("..") || fileName.contains("/") || fileName.contains("\\")) {
-                sendJson(ctx, Map.of("success", false, "error", "Invalid filename"));
-                return;
-            }
-            // Offload file existence check from EventLoop
-            Channel channel = ctx.channel();
-            blockingExecutor.submit(() -> {
-                Path file = LOGS_DIR.resolve(fileName);
-                if (!Files.exists(file) || Files.isDirectory(file)) {
-                    if (channel.isActive()) {
-                        channel.eventLoop().execute(() -> sendJsonObject(channel, Map.of("success", false, "error", "File not found")));
-                    }
-                    return;
-                }
-                // Back to EventLoop for zero-copy file transfer
-                channel.eventLoop().execute(() -> sendFileDirect(channel, file, fileName));
-            });
-            return; // don't send response inline, done in callback
-        }
-        // List log files — offload blocking I/O
-        Channel channel = ctx.channel();
-        blockingExecutor.submit(() -> {
-            List<Map<String, Object>> files = new ArrayList<>();
-            if (Files.exists(LOGS_DIR) && Files.isDirectory(LOGS_DIR)) {
-                try (var stream = Files.list(LOGS_DIR)) {
-                    stream.filter(p -> !Files.isDirectory(p)).sorted((a, b) -> {
-                        try { return Files.getLastModifiedTime(b).compareTo(Files.getLastModifiedTime(a)); }
-                        catch (IOException e) { return 0; }
-                    }).forEach(p -> {
-                        Map<String, Object> info = new LinkedHashMap<>();
-                        info.put("name", p.getFileName().toString());
-                        try { info.put("size", Files.size(p)); } catch (IOException e) { info.put("size", 0); }
-                        try { info.put("lastModified", Files.getLastModifiedTime(p).toMillis()); } catch (IOException e) { info.put("lastModified", 0); }
-                        files.add(info);
-                    });
-                } catch (IOException ignored) {}
-            }
-            if (channel.isActive()) {
-                channel.eventLoop().execute(() -> sendJsonObject(channel, files));
-            }
-        });
     }
 
     private void handleLogStream(ChannelHandlerContext ctx) {
@@ -846,8 +798,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
-    private static final Path LOGS_DIR = Path.of("logs");
-
     private void handleStaticFile(ChannelHandlerContext ctx, String path) {
         if ("/".equals(path)) path = "/index.html";
 
@@ -946,32 +896,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         channel.write(resp);
         channel.write(new DefaultHttpContent(buf));
         channel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-    }
-
-    /** Zero-copy file send directly to a channel (for async callbacks) */
-    private void sendFileDirect(Channel channel, Path file, String fileName) {
-        try {
-            long fileSize = Files.size(file);
-            String ct = "text/plain";
-            if (fileName.toLowerCase().endsWith(".gz")) ct = "application/gzip";
-            else if (fileName.toLowerCase().endsWith(".zip")) ct = "application/zip";
-
-            HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-            response.headers().set(HttpHeaderNames.CONTENT_TYPE, ct);
-            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, fileSize);
-            response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
-            channel.write(response);
-
-            FileChannel fileChannel = FileChannel.open(file, StandardOpenOption.READ);
-            DefaultFileRegion region = new DefaultFileRegion(fileChannel, 0, fileSize);
-            channel.write(region).addListener(future -> {
-                fileChannel.close();
-                if (!future.isSuccess()) channel.close();
-            });
-            channel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-        } catch (Exception e) {
-            sendJsonObject(channel, Map.of("success", false, "error", e.getMessage()));
-        }
     }
 
     private void sendCorsResponse(ChannelHandlerContext ctx) {
