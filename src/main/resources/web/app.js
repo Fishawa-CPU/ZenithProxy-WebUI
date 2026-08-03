@@ -135,17 +135,26 @@ function navigateTo(page) {
     switch (page) {
         case 'dashboard': loadDashboard(); initCharts(); startSystemPolling(); break;
         case 'config': loadConfig(); break;
-        case 'terminal': scrollTerminalToBottom(); break;
+        case 'terminal': refreshTerminalLogs(); break;
         case 'players': loadPlayers(); loadWhitelist(); break;
     }
     if (page !== 'dashboard') stopSystemPolling();
 }
 
-function scrollTerminalToBottom() {
+function refreshTerminalLogs() {
     const output = document.getElementById('terminalOutput');
-    if (output) {
-        output.scrollTop = output.scrollHeight;
+    if (!output) return;
+    // Clear existing logs
+    output.innerHTML = '';
+    // Re-add all buffered logs
+    for (const log of logs) {
+        const entry = document.createElement('div');
+        entry.className = 'terminal-line terminal-line-log';
+        const ts = new Date(log.timestamp).toLocaleTimeString();
+        entry.innerHTML = `<span class="log-ts">${escapeHtml(ts)}</span><span class="log-lv ${escapeHtml(log.level.toLowerCase())}">${escapeHtml(log.level)}</span><span class="log-msg">[${escapeHtml(log.logger)}] ${escapeHtml(log.message)}</span>`;
+        output.appendChild(entry);
     }
+    output.scrollTop = output.scrollHeight;
 }
 
 // ── API ───────────────────────────────────────
@@ -476,20 +485,6 @@ async function sendTerminalCommand(command) {
     }
 }
 
-// ── Log Polling (HTTP) ────────────────────────
-function startLogPolling() {
-    if (logPollTimer) return;
-    fetchLogs(); // fetch immediately
-    logPollTimer = setInterval(fetchLogs, LOG_POLL_INTERVAL);
-}
-
-function stopLogPolling() {
-    if (logPollTimer) {
-        clearInterval(logPollTimer);
-        logPollTimer = null;
-    }
-}
-
 // ── Autocomplete ──────────────────────────────
 function showAutocomplete(value) {
     const dropdown = document.getElementById('autocompleteDropdown');
@@ -510,6 +505,7 @@ function addLogEntry(log) {
     logs.push(log);
     terminalLogCount++;
     updateTerminalCounts();
+    if (currentPage !== 'terminal') return;
     const output = document.getElementById('terminalOutput');
     if (!output) return;
     const entry = document.createElement('div');
