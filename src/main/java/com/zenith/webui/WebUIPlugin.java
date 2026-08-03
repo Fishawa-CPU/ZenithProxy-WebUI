@@ -503,9 +503,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     } else {
                         root = new com.google.gson.JsonObject();
                     }
-                    for (var entry : incoming.entrySet()) {
-                        root.add(entry.getKey(), entry.getValue());
-                    }
+                    // Deep merge: only update fields the frontend sent, preserve unknown fields
+                    deepMerge(root, incoming);
+
                     Files.writeString(configPath, GSON.toJson(root));
 
                     // Invalidate all tokens if password was changed
@@ -524,6 +524,20 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     }
                 }
             });
+        }
+    }
+
+    /** Deep merge source into target, preserving target fields not in source */
+    private void deepMerge(com.google.gson.JsonObject target, com.google.gson.JsonObject source) {
+        for (var entry : source.entrySet()) {
+            String key = entry.getKey();
+            if (!target.has(key)) {
+                target.add(key, entry.getValue());
+            } else if (entry.getValue().isJsonObject() && target.get(key).isJsonObject()) {
+                deepMerge(target.getAsJsonObject(key), entry.getValue().getAsJsonObject());
+            } else {
+                target.add(key, entry.getValue());
+            }
         }
     }
 
