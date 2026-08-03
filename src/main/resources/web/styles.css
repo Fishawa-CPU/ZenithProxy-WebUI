@@ -1106,18 +1106,6 @@ body {
     color: var(--ctp-overlay0);
 }
 
-/* ── Refresh hint ──────────────────────────── */
-.refresh-hint {
-    font-size: 0.75rem;
-    color: var(--ctp-overlay0);
-    cursor: pointer;
-    user-select: none;
-    transition: color 0.2s;
-}
-.refresh-hint:hover {
-    color: var(--ctp-text);
-}
-
 /* ── Whitelist ──────────────────────────────── */
 .whitelist-section {
     background-color: var(--ctp-surface0);

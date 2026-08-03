@@ -55,10 +55,8 @@ let terminalScrollLocked = true;
 let currentPage = 'dashboard';
 let chartsInitialized = false;
 
-// Log polling state
-let lastLogId = -1;
-let logPollTimer = null;
-const LOG_POLL_INTERVAL = 1000; // 1 second
+// Log SSE stream
+let logEventSource = null;
 
 // Terminal command tracking
 let terminalCmdCount = 0;
@@ -66,6 +64,7 @@ let terminalLogCount = 0;
 
 // Server state for queue display
 let currentConnected = false;
+let queueInitialized = false; // true after first status check
 let queueConnectedTime = 0;
 const QUEUE_LOADING_DELAY = 5000; // 5 seconds loading delay
 
@@ -116,6 +115,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     loadDashboard();
+    initCharts();
+    startSystemPolling();
     loadCommands();
     startLogPolling();
 });
@@ -176,112 +177,70 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     } catch (e) { return null; }
 }
 
-// ── Log Polling (HTTP) ────────────────────────
+// ── Log SSE Stream ────────────────────────────
 function startLogPolling() {
-    if (logPollTimer) return;
-    fetchLogs(); // fetch immediately
-    logPollTimer = setInterval(fetchLogs, LOG_POLL_INTERVAL);
-}
-
-function stopLogPolling() {
-    if (logPollTimer) {
-        clearInterval(logPollTimer);
-        logPollTimer = null;
-    }
-}
-
-async function fetchLogs() {
-    try {
-        const url = API_BASE + '/logs/live' + (lastLogId >= 0 ? `?after=${lastLogId}` : '');
-        const r = await fetch(url, { credentials: 'include' });
-        if (r.status === 401) {
-            window.location.href = '/login.html';
-            return;
-        }
-        const data = await r.json();
-        if (data && data.logs && Array.isArray(data.logs)) {
-            for (const log of data.logs) {
-                addLogEntry(log);
-            }
-            if (data.logs.length > 0) {
-                lastLogId = data.counter - 1;
-            }
-        }
-    } catch (e) {
-        // polling failed, will retry next interval
-    }
+    if (logEventSource) return;
+    logEventSource = new EventSource('/api/logs/stream');
+    logEventSource.onmessage = (event) => {
+        try {
+            const log = JSON.parse(event.data);
+            addLogEntry(log);
+        } catch (e) {}
+    };
+    logEventSource.onerror = () => {
+        // SSE will auto-reconnect
+    };
 }
 
 // ── Dashboard ─────────────────────────────────
 async function loadDashboard() {
-    const [s, p, pl, q] = await Promise.all([apiCall('/status'), apiCall('/players'), apiCall('/player'), apiCall('/queue')]);
-    if (!s) return;
-    document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
-    document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
-    document.getElementById('currentUsername').textContent = s.username || '-';
-    document.getElementById('proxyAddress').textContent = s.proxyAddress || '-';
-    document.getElementById('mcVersion').textContent = s.version || '-';
+    const d = await apiCall('/dashboard');
+    if (!d) return;
 
-    // Save server state for queue display
+    document.getElementById('proxyStatus').textContent = d.connected ? '已连接' : '未连接';
+    document.getElementById('proxyStatus').style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
+    document.getElementById('currentUsername').textContent = d.username || '-';
+    document.getElementById('mcVersion').textContent = d.version || '-';
+    document.getElementById('version').textContent = 'v' + (d.version || '?');
+
+    // Connected state for queue loading
     const wasConnected = currentConnected;
-    currentConnected = s.connected || false;
-    if (currentConnected && !wasConnected) {
-        // Transition from disconnected → connected: start loading countdown
-        queueConnectedTime = Date.now();
-    }
-    if (!currentConnected) {
-        queueConnectedTime = 0;
-    }
-    // If proxy was already connected before page load, use uptime to determine recency
-    if (currentConnected && s.uptime != null && s.uptime < QUEUE_LOADING_DELAY) {
-        queueConnectedTime = Date.now() - s.uptime;
-    }
+    currentConnected = d.connected || false;
+    if (currentConnected && !wasConnected && queueInitialized) queueConnectedTime = Date.now();
+    if (!currentConnected) { queueConnectedTime = 0; queueInitialized = true; }
+    else queueInitialized = true;
 
+    // Queue
+    const q = { inQueue: d.inQueue, position: d.queuePosition, onlinePlayers: d.queueOnlinePlayers };
     renderQueue(q);
 
-    // Player health/food display
-    const statsEl = document.getElementById('playerStats');
-    if (pl && pl.connected && pl.health !== null) {
-        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">hp ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">hu ${pl.food}/20</span>`;
+    // Uptime
+    if (d.uptime) {
+        const h = Math.floor(d.uptime / 3600000), m = Math.floor((d.uptime % 3600000) / 60000), s = Math.floor((d.uptime % 60000) / 1000);
+        document.getElementById('uptime').textContent = `${h}时 ${m}分 ${s}秒`;
+    }
+
+    // Player stats
+    if (d.player && d.player.connected && d.player.health !== null) {
+        const pl = d.player;
+        document.getElementById('playerStats').innerHTML = `<span style="color:${pl.health>10?'var(--success-color)':pl.health>5?'var(--warning-color)':'var(--error-color)'}">hp ${pl.health}/20</span> &nbsp; <span style="color:${pl.food>10?'var(--success-color)':pl.food>5?'var(--warning-color)':'var(--error-color)'}">hu ${pl.food}/20</span>`;
     } else {
-        statsEl.textContent = '-';
-        statsEl.style.color = 'var(--ctp-overlay1)';
+        document.getElementById('playerStats').textContent = '-';
+        document.getElementById('playerStats').style.color = 'var(--ctp-overlay1)';
     }
-    if (s.uptime) {
-        const h = Math.floor(s.uptime / 3600000), m = Math.floor((s.uptime % 3600000) / 60000), sec = Math.floor((s.uptime % 60000) / 1000);
-        document.getElementById('uptime').textContent = `${h}时 ${m}分 ${sec}秒`;
-    }
-    // Player connection display
-    const pc = document.getElementById('playerConnection');
-    if (p && p.length > 0) {
-        const names = p.map(x => x.name).join(', ');
-        pc.textContent = `${p.length} 人: ${names}`;
+
+    // Player connection (latency players list)
+    if (d.latency && d.latency.players && d.latency.players.length > 0) {
+        const names = d.latency.players.map(x => x.name).join(', ');
+        const pc = document.getElementById('playerConnection');
+        pc.textContent = `${d.latency.players.length} 人: ${names}`;
         pc.style.color = 'var(--success-color)';
     } else {
+        const pc = document.getElementById('playerConnection');
         pc.textContent = '无连接';
         pc.style.color = 'var(--ctp-overlay1)';
     }
-    document.getElementById('version').textContent = 'v' + s.version;
 }
-async function refreshDashboard() {
-    await loadDashboard();
-    updateRefreshHint();
-}
-
-function updateRefreshHint() {
-    const hint = document.getElementById('refreshHint');
-    if (hint) {
-        const now = new Date();
-        const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        hint.textContent = `已更新 ${time}`;
-        hint.classList.add('updated');
-        setTimeout(() => {
-            hint.textContent = '自动刷新中';
-            hint.classList.remove('updated');
-        }, 2000);
-    }
-}
-
 function renderQueue(q) {
     const posEl = document.getElementById('queuePosText');
     const onlineEl = document.getElementById('queueOnlineText');
@@ -362,31 +321,80 @@ function initCharts() {
     ] }, options: { ...makeChartOptions('ms', 200), plugins: { ...makeChartOptions('ms', 200).plugins, legend: { display: true, position: 'top', labels: { color: chartColors.text, boxWidth: 12, padding: 10, font: { size: 11 } } } } } });
 }
 
-let systemPollTimer = null;
-const SYSTEM_POLL_INTERVAL = 1000;
+let dashboardEventSource = null;
 
 function startSystemPolling() {
-    if (systemPollTimer) return;
-    fetchSystemStats();
-    systemPollTimer = setInterval(fetchSystemStats, SYSTEM_POLL_INTERVAL);
+    if (dashboardEventSource) return;
+    dashboardEventSource = new EventSource('/api/dashboard/stream');
+    dashboardEventSource.onmessage = (event) => {
+        if (currentPage !== 'dashboard') return;
+        try {
+            const d = JSON.parse(event.data);
+            processDashboardData(d);
+        } catch (e) {}
+    };
+    dashboardEventSource.onerror = () => {
+        // SSE will auto-reconnect
+    };
+    // Fetch once immediately via HTTP while SSE connects
+    apiCall('/api/dashboard').then(d => { if (d && currentPage === 'dashboard') processDashboardData(d); });
 }
 
 function stopSystemPolling() {
-    if (systemPollTimer) { clearInterval(systemPollTimer); systemPollTimer = null; }
+    if (dashboardEventSource) {
+        dashboardEventSource.close();
+        dashboardEventSource = null;
+    }
 }
 
-async function fetchSystemStats() {
-    if (currentPage !== 'dashboard') { stopSystemPolling(); return; }
-    const [sys, lat, q] = await Promise.all([apiCall('/system'), apiCall('/latency'), apiCall('/queue')]);
+function processDashboardData(d) {
+    if (!d) return;
     const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+    // Update connected state
+    const wasConnected = currentConnected;
+    currentConnected = d.connected || false;
+    if (currentConnected && !wasConnected && queueInitialized) queueConnectedTime = Date.now();
+    if (!currentConnected) { queueConnectedTime = 0; queueInitialized = true; }
+    else queueInitialized = true;
+
+    // Queue
+    const q = { inQueue: d.inQueue, position: d.queuePosition, onlinePlayers: d.queueOnlinePlayers };
     renderQueue(q);
+
+    // Uptime
+    if (d.uptime) {
+        const el = document.getElementById('uptime');
+        if (el) {
+            const h = Math.floor(d.uptime / 3600000), m = Math.floor((d.uptime % 3600000) / 60000), s = Math.floor((d.uptime % 60000) / 1000);
+            el.textContent = `${h}时 ${m}分 ${s}秒`;
+        }
+    }
+
+    // Health/food
+    const pl = d.player;
+    if (pl) {
+        const statsEl = document.getElementById('playerStats');
+        if (statsEl) {
+            if (pl.connected && pl.health !== null) {
+                statsEl.innerHTML = `<span style="color:${pl.health>10?'var(--success-color)':pl.health>5?'var(--warning-color)':'var(--error-color)'}">hp ${pl.health}/20</span> &nbsp; <span style="color:${pl.food>10?'var(--success-color)':pl.food>5?'var(--warning-color)':'var(--error-color)'}">hu ${pl.food}/20</span>`;
+            } else {
+                statsEl.textContent = '-';
+                statsEl.style.color = 'var(--ctp-overlay1)';
+            }
+        }
+    }
+
+    // Charts
+    const sys = d.system;
     if (sys && cpuChart) { cpuChart.data.datasets[0].data.push(Math.max(0, sys.cpuLoad || 0)); cpuChart.data.labels.push(now); if (cpuChart.data.datasets[0].data.length > MAX_DATA_POINTS) { cpuChart.data.datasets[0].data.shift(); cpuChart.data.labels.shift(); } cpuChart.update('none'); }
     if (sys && memoryChart) { memoryChart.data.datasets[0].data.push(sys.memoryPercent || 0); memoryChart.data.labels.push(now); if (memoryChart.data.datasets[0].data.length > MAX_DATA_POINTS) { memoryChart.data.datasets[0].data.shift(); memoryChart.data.labels.shift(); } memoryChart.update('none'); }
     if (sys && networkChart) { networkChart.data.datasets[0].data.push(Math.round((sys.netBytesPerSecIn || 0) / 1024 * 10) / 10); networkChart.data.datasets[1].data.push(Math.round((sys.netBytesPerSecOut || 0) / 1024 * 10) / 10); networkChart.data.labels.push(now); if (networkChart.data.datasets[0].data.length > MAX_DATA_POINTS) { networkChart.data.datasets[0].data.shift(); networkChart.data.datasets[1].data.shift(); networkChart.data.labels.shift(); } networkChart.update('none'); }
+
+    // Latency
+    const lat = d.latency;
     if (lat && latencyChart) {
-        latencyChart.data.datasets[0].data.push(lat.connected ? (lat.botLatency || 0) : 0);
-        // Average player latency
+        latencyChart.data.datasets[0].data.push(d.connected ? (lat.botLatency || 0) : 0);
         let avgPlayerPing = 0;
         if (lat.players && lat.players.length > 0) {
             let sum = 0;
@@ -395,20 +403,14 @@ async function fetchSystemStats() {
         }
         latencyChart.data.datasets[1].data.push(avgPlayerPing);
         latencyChart.data.labels.push(now);
-        if (latencyChart.data.datasets[0].data.length > MAX_DATA_POINTS) {
-            latencyChart.data.datasets[0].data.shift();
-            latencyChart.data.datasets[1].data.shift();
-            latencyChart.data.labels.shift();
-        }
+        if (latencyChart.data.datasets[0].data.length > MAX_DATA_POINTS) { latencyChart.data.datasets[0].data.shift(); latencyChart.data.datasets[1].data.shift(); latencyChart.data.labels.shift(); }
         latencyChart.update('none');
-        // Update player latency detail
+
         const detail = document.getElementById('latencyDetail');
         if (detail) {
             let html = `<div class="latency-item"><span class="player-name">Bot→Server</span><span class="ping-value ${getPingClass(lat.botLatency)}">${lat.botLatency}ms</span></div>`;
             if (lat.players && lat.players.length > 0) {
-                for (const p of lat.players) {
-                    html += `<div class="latency-item"><span class="player-name">${escapeHtml(p.name)}</span><span class="ping-value ${getPingClass(p.ping)}">${escapeHtml(String(p.ping))}ms</span></div>`;
-                }
+                for (const p of lat.players) html += `<div class="latency-item"><span class="player-name">${escapeHtml(p.name)}</span><span class="ping-value ${getPingClass(p.ping)}">${escapeHtml(String(p.ping))}ms</span></div>`;
             }
             detail.innerHTML = html;
         }
@@ -635,7 +637,6 @@ async function loadPlayers() {
         c.innerHTML = p.map(x => `<tr><td>${escapeHtml(x.name)}</td><td style="font-family:monospace;font-size:0.85rem;color:var(--ctp-overlay1);">${escapeHtml(x.uuid)}</td><td><span class="player-badge ${escapeHtml(x.type)}">${x.type === 'controller' ? '控制器' : '观察者'}</span></td><td><button class="btn btn-secondary" onclick="sendTerminalCommand('/kick ${escapeHtml(x.name)}')">踢出</button></td></tr>`).join('');
     }
 }
-function refreshPlayers() { loadPlayers(); loadWhitelist(); }
 
 // ── Whitelist ─────────────────────────────────
 async function loadWhitelist() {

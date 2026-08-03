@@ -87,6 +87,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
     // SSE clients using Netty channels
     private static final List<Channel> sseClients = new CopyOnWriteArrayList<>();
+    private static final List<Channel> dashboardSseClients = new CopyOnWriteArrayList<>();
+    private java.util.concurrent.ScheduledExecutorService dashboardStreamExecutor;
 
     // File cache for static files (path -> content)
     private static final ConcurrentHashMap<Path, byte[]> fileCache = new ConcurrentHashMap<>();
@@ -201,6 +203,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             serverChannel = b.bind(port).sync().channel();
             LOG.info("Netty NIO server started on port {}", port);
 
+            startDashboardStream();
+
             // Register Title packet handler
             try {
                 var titleCodec = PacketHandlerCodec.clientBuilder()
@@ -294,6 +298,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             ch.close();
         }
         sseClients.clear();
+        for (Channel ch : dashboardSseClients) {
+            ch.close();
+        }
+        dashboardSseClients.clear();
+        if (dashboardStreamExecutor != null) {
+            dashboardStreamExecutor.shutdownNow();
+            dashboardStreamExecutor = null;
+        }
         if (serverChannel != null) serverChannel.close();
         if (workerGroup != null) workerGroup.shutdownGracefully();
         if (bossGroup != null) bossGroup.shutdownGracefully();
@@ -420,6 +432,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     case "/api/logs" -> handleLogsFile(ctx, query);
                     case "/api/logs/live" -> handleLogPoll(ctx, query);
                     case "/api/logs/stream" -> handleLogStream(ctx);
+                    case "/api/dashboard" -> handleDashboard(ctx);
+                    case "/api/dashboard/stream" -> handleDashboardStream(ctx);
                     case "/api/system" -> handleSystem(ctx);
                     case "/api/latency" -> handleLatency(ctx);
                     case "/api/player" -> handlePlayer(ctx);
@@ -439,6 +453,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         @Override
         public void channelInactive(ChannelHandlerContext ctx) {
             sseClients.remove(ctx.channel());
+            dashboardSseClients.remove(ctx.channel());
         }
     }
 
@@ -703,20 +718,20 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             }
         } catch (Exception ignored) {}
 
-        long deltaIn = 0, deltaOut = 0;
+        long prevTime = lastNetworkTime.getAndSet(now);
         double bytesPerSecIn = 0, bytesPerSecOut = 0;
-        if (lastNetworkTime > 0) {
-            double elapsed = (now - lastNetworkTime) / 1000.0;
+        if (prevTime > 0) {
+            double elapsed = (now - prevTime) / 1000.0;
             if (elapsed > 0) {
-                deltaIn = totalBytesIn - lastBytesIn;
-                deltaOut = totalBytesOut - lastBytesOut;
-                bytesPerSecIn = Math.round(deltaIn / elapsed * 10.0) / 10.0;
-                bytesPerSecOut = Math.round(deltaOut / elapsed * 10.0) / 10.0;
+                long prevBytesIn = lastBytesIn.getAndSet(totalBytesIn);
+                long prevBytesOut = lastBytesOut.getAndSet(totalBytesOut);
+                bytesPerSecIn = Math.round((totalBytesIn - prevBytesIn) / elapsed * 10.0) / 10.0;
+                bytesPerSecOut = Math.round((totalBytesOut - prevBytesOut) / elapsed * 10.0) / 10.0;
             }
+        } else {
+            lastBytesIn.set(totalBytesIn);
+            lastBytesOut.set(totalBytesOut);
         }
-        lastNetworkTime = now;
-        lastBytesIn = totalBytesIn;
-        lastBytesOut = totalBytesOut;
 
         data.put("netBytesPerSecIn", bytesPerSecIn);
         data.put("netBytesPerSecOut", bytesPerSecOut);
@@ -727,9 +742,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         sendJson(ctx, data);
     }
 
-    private static volatile long lastNetworkTime = 0;
-    private static volatile long lastBytesIn = 0;
-    private static volatile long lastBytesOut = 0;
+    private static final AtomicLong lastNetworkTime = new AtomicLong(0);
+    private static final AtomicLong lastBytesIn = new AtomicLong(0);
+    private static final AtomicLong lastBytesOut = new AtomicLong(0);
 
     private void handleLatency(ChannelHandlerContext ctx) {
         Map<String, Object> data = new LinkedHashMap<>();
@@ -789,6 +804,161 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
         sendJson(ctx, data);
     }
+
+    private Map<String, Object> buildDashboardData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        try {
+            // --- Status ---
+            data.put("connected", Proxy.getInstance().isConnected());
+            QueueData qd = getQueueData();
+            data.put("inQueue", qd.inQueue);
+            data.put("queuePosition", qd.position);
+            data.put("queueOnlinePlayers", qd.onlinePlayers);
+            data.put("queuePos", qd.queuePos);
+            data.put("version", MC_VERSION);
+            data.put("username", CONFIG.authentication.username);
+            data.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
+
+            // --- System ---
+            Map<String, Object> sys = new LinkedHashMap<>();
+            double cpuLoad = -1;
+            try {
+                java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+                cpuLoad = osBean.getSystemLoadAverage();
+                if (cpuLoad >= 0) cpuLoad = Math.round(cpuLoad * 100.0) / 100.0;
+            } catch (Exception ignored) {}
+            sys.put("cpuLoad", cpuLoad);
+            Runtime rt = Runtime.getRuntime();
+            long usedMem = rt.totalMemory() - rt.freeMemory();
+            sys.put("memoryPercent", Math.round(usedMem * 10000.0 / rt.maxMemory()) / 100.0);
+            long now = System.currentTimeMillis();
+            long totalBytesIn = 0, totalBytesOut = 0;
+            try {
+                List<String> lines = Files.readAllLines(Path.of("/proc/net/dev"));
+                for (String line : lines) {
+                    line = line.trim();
+                    if (line.contains(":") && !line.startsWith("Inter") && !line.startsWith("face")) {
+                        String[] parts = line.split(":");
+                        if (parts.length >= 2) {
+                            String[] stats = parts[1].trim().split("\\s+");
+                            if (stats.length >= 10) {
+                                totalBytesIn += Long.parseLong(stats[0]);
+                                totalBytesOut += Long.parseLong(stats[8]);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            double bytesPerSecIn = 0, bytesPerSecOut = 0;
+            long prevTime = lastDashboardNetTime.getAndSet(now);
+            if (prevTime > 0) {
+                double elapsed = (now - prevTime) / 1000.0;
+                if (elapsed > 0) {
+                    long prevBytesIn = lastDashboardBytesIn.getAndSet(totalBytesIn);
+                    long prevBytesOut = lastDashboardBytesOut.getAndSet(totalBytesOut);
+                    bytesPerSecIn = Math.round((totalBytesIn - prevBytesIn) / elapsed * 10.0) / 10.0;
+                    bytesPerSecOut = Math.round((totalBytesOut - prevBytesOut) / elapsed * 10.0) / 10.0;
+                }
+            } else {
+                lastDashboardBytesIn.set(totalBytesIn);
+                lastDashboardBytesOut.set(totalBytesOut);
+            }
+            sys.put("netBytesPerSecIn", bytesPerSecIn);
+            sys.put("netBytesPerSecOut", bytesPerSecOut);
+            data.put("system", sys);
+
+            // --- Latency ---
+            Map<String, Object> lat = new LinkedHashMap<>();
+            try {
+                var client = Proxy.getInstance().getClient();
+                boolean lc = client != null && client.isConnected();
+                lat.put("botLatency", lc ? client.getPing() : -1);
+                List<Map<String, Object>> players = new ArrayList<>();
+                for (var session : Proxy.getInstance().getActiveConnections().getArray()) {
+                    Map<String, Object> p = new LinkedHashMap<>();
+                    p.put("name", session.getName());
+                    p.put("ping", session.getPing());
+                    players.add(p);
+                }
+                lat.put("players", players);
+            } catch (Exception e) {
+                lat.put("botLatency", -1);
+                lat.put("players", new ArrayList<>());
+            }
+            data.put("latency", lat);
+
+            // --- Player ---
+            Map<String, Object> pl = new LinkedHashMap<>();
+            try {
+                var client = Proxy.getInstance().getClient();
+                boolean pc = client != null && client.isConnected();
+                pl.put("connected", pc);
+                if (pc) {
+                    var thePlayer = CACHE.getPlayerCache().getThePlayer();
+                    pl.put("health", thePlayer != null ? thePlayer.getHealth() : null);
+                    pl.put("food", thePlayer != null ? thePlayer.getFood() : null);
+                } else {
+                    pl.put("health", null);
+                    pl.put("food", null);
+                }
+            } catch (Exception e) {
+                pl.put("connected", false);
+                pl.put("health", null);
+                pl.put("food", null);
+            }
+            data.put("player", pl);
+        } catch (Exception e) {
+            data.put("error", e.getMessage());
+        }
+        return data;
+    }
+
+    private void handleDashboard(ChannelHandlerContext ctx) {
+        sendJson(ctx, buildDashboardData());
+    }
+
+    private void handleDashboardStream(ChannelHandlerContext ctx) {
+        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream");
+        response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+        response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
+        ctx.writeAndFlush(response);
+        dashboardSseClients.add(ctx.channel());
+    }
+
+    private void startDashboardStream() {
+        dashboardStreamExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "webui-dashboard-stream");
+            t.setDaemon(true);
+            return t;
+        });
+        dashboardStreamExecutor.scheduleAtFixedRate(() -> {
+            try {
+                if (dashboardSseClients.isEmpty()) return;
+                Map<String, Object> data = buildDashboardData();
+                String json = GSON.toJson(data);
+                String sseData = "data: " + json + "\n\n";
+                dashboardSseClients.removeIf(ch -> {
+                    if (!ch.isActive()) return true;
+                    try {
+                        ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
+                        DefaultHttpContent content = new DefaultHttpContent(buf);
+                        ch.writeAndFlush(content).addListener(future -> {
+                            if (!future.isSuccess()) ch.close();
+                        });
+                        return false;
+                    } catch (Exception e) {
+                        ch.close();
+                        return true;
+                    }
+                });
+            } catch (Exception ignored) {}
+        }, 0, 1, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    private static final AtomicLong lastDashboardNetTime = new AtomicLong(0);
+    private static final AtomicLong lastDashboardBytesIn = new AtomicLong(0);
+    private static final AtomicLong lastDashboardBytesOut = new AtomicLong(0);
 
     private void handleWhitelist(ChannelHandlerContext ctx, FullHttpRequest req) {
         if (HttpMethod.GET.equals(req.method())) {
