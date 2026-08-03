@@ -887,6 +887,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             } catch (Exception ignored) {}
             data.put("viaVersion", viaVersionStr);
             data.put("username", CONFIG.authentication.username);
+            data.put("proxyAddress", CONFIG.server.getProxyAddress());
             data.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
 
             // --- System ---

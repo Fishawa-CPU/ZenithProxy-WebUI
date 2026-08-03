@@ -200,6 +200,7 @@ async function loadDashboard() {
     document.getElementById('proxyStatus').textContent = d.connected ? '已连接' : '未连接';
     document.getElementById('proxyStatus').style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
     document.getElementById('currentUsername').textContent = d.username || '-';
+    document.getElementById('proxyAddress').textContent = d.proxyAddress || '-';
     document.getElementById('mcVersion').textContent = d.version || '-';
     const viaEl = document.getElementById('viaVersion');
     if (viaEl) viaEl.textContent = d.viaVersion || '';
