@@ -92,6 +92,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private static final List<Channel> dashboardSseClients = new CopyOnWriteArrayList<>();
     private static final Map<Channel, String> sseClientTokens = new ConcurrentHashMap<>();
     private java.util.concurrent.ScheduledExecutorService dashboardStreamExecutor;
+    private java.util.concurrent.ExecutorService blockingExecutor;
 
     // File cache for static files (path -> content)
     private static final ConcurrentHashMap<Path, byte[]> fileCache = new ConcurrentHashMap<>();
@@ -206,6 +207,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             serverChannel = b.bind(port).sync().channel();
             LOG.info("Netty NIO server started on port {}", port);
 
+            blockingExecutor = java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+                Thread t = new Thread(r, "webui-blocking");
+                t.setDaemon(true);
+                return t;
+            });
+
             startDashboardStream();
 
             // Register Title packet handler
@@ -309,6 +316,10 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             dashboardStreamExecutor.shutdownNow();
             dashboardStreamExecutor = null;
         }
+        if (blockingExecutor != null) {
+            blockingExecutor.shutdownNow();
+            blockingExecutor = null;
+        }
         if (serverChannel != null) serverChannel.close();
         if (workerGroup != null) workerGroup.shutdownGracefully();
         if (bossGroup != null) bossGroup.shutdownGracefully();
@@ -331,24 +342,16 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         notifySSEClients(level, logger, message);
     }
 
-    private void notifySSEClients(String level, String logger, String message) {
-        com.google.gson.JsonObject log = new com.google.gson.JsonObject();
-        log.addProperty("level", level);
-        log.addProperty("logger", logger);
-        log.addProperty("message", message);
-        log.addProperty("timestamp", System.currentTimeMillis());
-        String json = GSON.toJson(log);
+    /** Broadcast SSE message to a client list. Shared by all SSE pushers. */
+    private static void broadcastSSE(List<Channel> clients, String json) {
         String sseData = "data: " + json + "\n\n";
-
-        sseClients.removeIf(ch -> {
-            if (!ch.isActive()) return true;
+        clients.removeIf(ch -> {
+            if (!ch.isActive()) { sseClientTokens.remove(ch); return true; }
             try {
                 ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
                 DefaultHttpContent content = new DefaultHttpContent(buf);
                 ch.writeAndFlush(content).addListener(future -> {
-                    if (!future.isSuccess()) {
-                        ch.close();
-                    }
+                    if (!future.isSuccess()) ch.close();
                 });
                 return false;
             } catch (Exception e) {
@@ -358,29 +361,20 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         });
     }
 
+    private void notifySSEClients(String level, String logger, String message) {
+        com.google.gson.JsonObject log = new com.google.gson.JsonObject();
+        log.addProperty("level", level);
+        log.addProperty("logger", logger);
+        log.addProperty("message", message);
+        log.addProperty("timestamp", System.currentTimeMillis());
+        broadcastSSE(sseClients, GSON.toJson(log));
+    }
+
     public static void pushTitle(String text) {
         com.google.gson.JsonObject data = new com.google.gson.JsonObject();
         data.addProperty("type", "title");
         data.addProperty("text", text);
-        String json = GSON.toJson(data);
-        String sseData = "data: " + json + "\n\n";
-
-        sseClients.removeIf(ch -> {
-            if (!ch.isActive()) return true;
-            try {
-                ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
-                DefaultHttpContent content = new DefaultHttpContent(buf);
-                ch.writeAndFlush(content).addListener(future -> {
-                    if (!future.isSuccess()) {
-                        ch.close();
-                    }
-                });
-                return false;
-            } catch (Exception e) {
-                ch.close();
-                return true;
-            }
-        });
+        broadcastSSE(sseClients, GSON.toJson(data));
     }
 
     // Netty Channel Handler
@@ -513,37 +507,44 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             }
             sendJson(ctx, configJson);
         } else if (HttpMethod.POST.equals(req.method())) {
-            try {
-                String body = req.content().toString(CharsetUtil.UTF_8);
-                com.google.gson.JsonObject incoming = GSON.fromJson(body, com.google.gson.JsonObject.class);
-                if (incoming == null) {
-                    sendJson(ctx, Map.of("success", false, "error", "Invalid JSON"));
-                    return;
-                }
-                com.google.gson.JsonObject root;
-                Path configPath = CONFIG_FILE.toPath();
-                if (Files.exists(configPath)) {
-                    root = GSON.fromJson(Files.readString(configPath), com.google.gson.JsonObject.class);
-                } else {
-                    root = new com.google.gson.JsonObject();
-                }
-                for (var entry : incoming.entrySet()) {
-                    root.add(entry.getKey(), entry.getValue());
-                }
-                Files.writeString(configPath, GSON.toJson(root));
+            String body = req.content().toString(CharsetUtil.UTF_8);
+            com.google.gson.JsonObject incoming = GSON.fromJson(body, com.google.gson.JsonObject.class);
+            if (incoming == null) {
+                sendJson(ctx, Map.of("success", false, "error", "Invalid JSON"));
+                return;
+            }
+            // Offload file I/O from EventLoop
+            Channel channel = ctx.channel();
+            blockingExecutor.submit(() -> {
+                try {
+                    Path configPath = CONFIG_FILE.toPath();
+                    com.google.gson.JsonObject root;
+                    if (Files.exists(configPath)) {
+                        root = GSON.fromJson(Files.readString(configPath), com.google.gson.JsonObject.class);
+                    } else {
+                        root = new com.google.gson.JsonObject();
+                    }
+                    for (var entry : incoming.entrySet()) {
+                        root.add(entry.getKey(), entry.getValue());
+                    }
+                    Files.writeString(configPath, GSON.toJson(root));
 
-                // Invalidate all tokens if password was changed
-                if (incoming.has("authentication")) {
-                    com.google.gson.JsonObject auth = incoming.getAsJsonObject("authentication");
-                    if (auth.has("password")) {
-                        authManager.invalidateAllTokensForUser(CONFIG.authentication.username);
+                    // Invalidate all tokens if password was changed
+                    if (incoming.has("authentication")) {
+                        com.google.gson.JsonObject auth = incoming.getAsJsonObject("authentication");
+                        if (auth.has("password")) {
+                            authManager.invalidateAllTokensForUser(CONFIG.authentication.username);
+                        }
+                    }
+                    if (channel.isActive()) {
+                        channel.eventLoop().execute(() -> sendJsonObject(channel, Map.of("success", true, "restartRequired", true)));
+                    }
+                } catch (Exception e) {
+                    if (channel.isActive()) {
+                        channel.eventLoop().execute(() -> sendJsonObject(channel, Map.of("success", false, "error", e.getMessage())));
                     }
                 }
-
-                sendJson(ctx, Map.of("success", true, "restartRequired", true));
-            } catch (Exception e) {
-                sendJson(ctx, Map.of("success", false, "error", e.getMessage()));
-            }
+            });
         }
     }
 
@@ -651,13 +652,24 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 sendJson(ctx, Map.of("success", false, "error", "Invalid filename"));
                 return;
             }
-            Path file = LOGS_DIR.resolve(fileName);
-            if (!Files.exists(file) || Files.isDirectory(file)) {
-                sendJson(ctx, Map.of("success", false, "error", "File not found"));
-                return;
-            }
-            sendFile(ctx, file, fileName);
-        } else {
+            // Offload file existence check from EventLoop
+            Channel channel = ctx.channel();
+            blockingExecutor.submit(() -> {
+                Path file = LOGS_DIR.resolve(fileName);
+                if (!Files.exists(file) || Files.isDirectory(file)) {
+                    if (channel.isActive()) {
+                        channel.eventLoop().execute(() -> sendJsonObject(channel, Map.of("success", false, "error", "File not found")));
+                    }
+                    return;
+                }
+                // Back to EventLoop for zero-copy file transfer
+                channel.eventLoop().execute(() -> sendFileDirect(channel, file, fileName));
+            });
+            return; // don't send response inline, done in callback
+        }
+        // List log files — offload blocking I/O
+        Channel channel = ctx.channel();
+        blockingExecutor.submit(() -> {
             List<Map<String, Object>> files = new ArrayList<>();
             if (Files.exists(LOGS_DIR) && Files.isDirectory(LOGS_DIR)) {
                 try (var stream = Files.list(LOGS_DIR)) {
@@ -671,12 +683,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                         try { info.put("lastModified", Files.getLastModifiedTime(p).toMillis()); } catch (IOException e) { info.put("lastModified", 0); }
                         files.add(info);
                     });
-                } catch (IOException e) {
-                    // ignore
-                }
+                } catch (IOException ignored) {}
             }
-            sendJson(ctx, files);
-        }
+            if (channel.isActive()) {
+                channel.eventLoop().execute(() -> sendJsonObject(channel, files));
+            }
+        });
     }
 
     private void handleLogPoll(ChannelHandlerContext ctx, String query) {
@@ -967,23 +979,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 // Validate SSE tokens periodically
                 validateSSETokens();
                 if (dashboardSseClients.isEmpty()) return;
-                Map<String, Object> data = buildDashboardData();
-                String json = GSON.toJson(data);
-                String sseData = "data: " + json + "\n\n";
-                dashboardSseClients.removeIf(ch -> {
-                    if (!ch.isActive()) { sseClientTokens.remove(ch); return true; }
-                    try {
-                        ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
-                        DefaultHttpContent content = new DefaultHttpContent(buf);
-                        ch.writeAndFlush(content).addListener(future -> {
-                            if (!future.isSuccess()) ch.close();
-                        });
-                        return false;
-                    } catch (Exception e) {
-                        ch.close();
-                        return true;
-                    }
-                });
+                broadcastSSE(dashboardSseClients, GSON.toJson(buildDashboardData()));
             } catch (Exception ignored) {}
         }, 0, 1, java.util.concurrent.TimeUnit.SECONDS);
     }
@@ -1178,6 +1174,44 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         ctx.write(httpResponse);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+    }
+
+    /** Send JSON directly to a channel (no ctx needed, for async callbacks) */
+    private void sendJsonObject(Channel channel, Object data) {
+        byte[] bytes = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
+        ByteBuf buf = Unpooled.wrappedBuffer(bytes);
+        HttpResponse resp = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+        resp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+        resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
+        channel.write(resp);
+        channel.write(new DefaultHttpContent(buf));
+        channel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+    }
+
+    /** Zero-copy file send directly to a channel (for async callbacks) */
+    private void sendFileDirect(Channel channel, Path file, String fileName) {
+        try {
+            long fileSize = Files.size(file);
+            String ct = "text/plain";
+            if (fileName.toLowerCase().endsWith(".gz")) ct = "application/gzip";
+            else if (fileName.toLowerCase().endsWith(".zip")) ct = "application/zip";
+
+            HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+            response.headers().set(HttpHeaderNames.CONTENT_TYPE, ct);
+            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, fileSize);
+            response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
+            channel.write(response);
+
+            FileChannel fileChannel = FileChannel.open(file, StandardOpenOption.READ);
+            DefaultFileRegion region = new DefaultFileRegion(fileChannel, 0, fileSize);
+            channel.write(region).addListener(future -> {
+                fileChannel.close();
+                if (!future.isSuccess()) channel.close();
+            });
+            channel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+        } catch (Exception e) {
+            sendJsonObject(channel, Map.of("success", false, "error", e.getMessage()));
+        }
     }
 
     private void sendCorsResponse(ChannelHandlerContext ctx) {
