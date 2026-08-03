@@ -427,19 +427,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     if (token != null) sseClientTokens.put(ctx.channel(), token);
                 }
                 switch (path) {
-                    case "/api/status" -> handleStatus(ctx);
                     case "/api/config" -> handleConfig(ctx, req);
                     case "/api/commands" -> handleCommands(ctx, req);
-                    case "/api/players" -> handlePlayers(ctx);
-                    case "/api/queue" -> handleQueue(ctx);
                     case "/api/logs" -> handleLogsFile(ctx, query);
-                    case "/api/logs/live" -> handleLogPoll(ctx, query);
                     case "/api/logs/stream" -> handleLogStream(ctx);
                     case "/api/dashboard" -> handleDashboard(ctx);
                     case "/api/dashboard/stream" -> handleDashboardStream(ctx);
-                    case "/api/system" -> handleSystem(ctx);
-                    case "/api/latency" -> handleLatency(ctx);
-                    case "/api/player" -> handlePlayer(ctx);
                     case "/api/whitelist" -> handleWhitelist(ctx, req);
                     default -> handleStaticFile(ctx, path);
                 }
@@ -482,20 +475,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     }
 
     // API Handlers
-    private void handleStatus(ChannelHandlerContext ctx) {
-        Map<String, Object> status = new LinkedHashMap<>();
-        status.put("connected", Proxy.getInstance().isConnected());
-        QueueData qd = getQueueData();
-        status.put("inQueue", qd.inQueue);
-        status.put("queuePosition", qd.position);
-        status.put("version", MC_VERSION);
-        status.put("username", CONFIG.authentication.username);
-        status.put("proxyAddress", CONFIG.server.getProxyAddress());
-        status.put("targetServer", CONFIG.client.server.address);
-        status.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
-        sendJson(ctx, status);
-    }
-
     private void handleConfig(ChannelHandlerContext ctx, FullHttpRequest req) {
         if (HttpMethod.GET.equals(req.method())) {
             // Return config without sensitive fields
@@ -588,27 +567,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
-    private void handlePlayers(ChannelHandlerContext ctx) {
-        List<Map<String, Object>> players = new ArrayList<>();
-        var currentPlayer = Proxy.getInstance().getCurrentPlayer().get();
-        if (currentPlayer != null) {
-            players.add(Map.of("name", currentPlayer.getName(), "uuid", currentPlayer.getUUID().toString(), "type", "controller"));
-        }
-        Proxy.getInstance().getActiveConnections().forEach(session ->
-            players.add(Map.of("name", session.getName(), "uuid", session.getUUID().toString(), "type", "spectator"))
-        );
-        sendJson(ctx, players);
-    }
 
-    private void handleQueue(ChannelHandlerContext ctx) {
-        Map<String, Object> queue = new LinkedHashMap<>();
-        QueueData qd = getQueueData();
-        queue.put("inQueue", qd.inQueue);
-        queue.put("position", qd.position);
-        queue.put("onlinePlayers", qd.onlinePlayers);
-        queue.put("queuePos", qd.queuePos);
-        sendJson(ctx, queue);
-    }
 
     // Queue data holders
     private record QueueData(boolean inQueue, int position, int onlinePlayers, String queuePos) {}
@@ -691,20 +650,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         });
     }
 
-    private void handleLogPoll(ChannelHandlerContext ctx, String query) {
-        long afterId = -1;
-        if (query != null && query.startsWith("after=")) {
-            try { afterId = Long.parseLong(query.substring(6)); } catch (NumberFormatException ignored) {}
-        }
-        List<Map<String, Object>> result = new ArrayList<>();
-        // ConcurrentLinkedDeque iterator is weakly consistent, no sync needed
-        for (Map<String, Object> entry : logBuffer) {
-            long id = (long) entry.get("id");
-            if (id > afterId) result.add(entry);
-        }
-        sendJson(ctx, Map.of("logs", result, "counter", logPollCounter.get()));
-    }
-
     private void handleLogStream(ChannelHandlerContext ctx) {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream");
@@ -731,137 +676,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         sseClients.add(ctx.channel());
     }
 
-    private void handleSystem(ChannelHandlerContext ctx) {
-        Map<String, Object> data = new LinkedHashMap<>();
 
-        // CPU
-        double cpuLoad = -1;
-        try {
-            java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-            cpuLoad = osBean.getSystemLoadAverage();
-            if (cpuLoad >= 0) cpuLoad = Math.round(cpuLoad * 100.0) / 100.0;
-        } catch (Exception ignored) {}
-        data.put("cpuLoad", cpuLoad);
-
-        // Memory
-        Runtime rt = Runtime.getRuntime();
-        long totalMem = rt.maxMemory();
-        long freeMem = rt.freeMemory();
-        long usedMem = rt.totalMemory() - freeMem;
-        double memUsedMB = Math.round(usedMem / 1048576.0 * 10.0) / 10.0;
-        double memTotalMB = Math.round(totalMem / 1048576.0 * 10.0) / 10.0;
-        double memPercent = Math.round(usedMem * 10000.0 / totalMem) / 100.0;
-        data.put("memoryUsedMB", memUsedMB);
-        data.put("memoryTotalMB", memTotalMB);
-        data.put("memoryPercent", memPercent);
-
-        // Network
-        long now = System.currentTimeMillis();
-        long totalBytesIn = 0;
-        long totalBytesOut = 0;
-        try {
-            List<String> lines = Files.readAllLines(Path.of("/proc/net/dev"));
-            for (String line : lines) {
-                line = line.trim();
-                if (line.contains(":") && !line.startsWith("Inter") && !line.startsWith("face")) {
-                    String[] parts = line.split(":");
-                    if (parts.length >= 2) {
-                        String[] stats = parts[1].trim().split("\\s+");
-                        if (stats.length >= 10) {
-                            totalBytesIn += Long.parseLong(stats[0]);
-                            totalBytesOut += Long.parseLong(stats[8]);
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-
-        long prevTime = lastNetworkTime.getAndSet(now);
-        double bytesPerSecIn = 0, bytesPerSecOut = 0;
-        if (prevTime > 0) {
-            double elapsed = (now - prevTime) / 1000.0;
-            if (elapsed > 0) {
-                long prevBytesIn = lastBytesIn.getAndSet(totalBytesIn);
-                long prevBytesOut = lastBytesOut.getAndSet(totalBytesOut);
-                bytesPerSecIn = Math.round((totalBytesIn - prevBytesIn) / elapsed * 10.0) / 10.0;
-                bytesPerSecOut = Math.round((totalBytesOut - prevBytesOut) / elapsed * 10.0) / 10.0;
-            }
-        } else {
-            lastBytesIn.set(totalBytesIn);
-            lastBytesOut.set(totalBytesOut);
-        }
-
-        data.put("netBytesPerSecIn", bytesPerSecIn);
-        data.put("netBytesPerSecOut", bytesPerSecOut);
-        data.put("netTotalBytesIn", totalBytesIn);
-        data.put("netTotalBytesOut", totalBytesOut);
-        data.put("threadCount", Thread.activeCount());
-
-        sendJson(ctx, data);
-    }
-
-    private static final AtomicLong lastNetworkTime = new AtomicLong(0);
-    private static final AtomicLong lastBytesIn = new AtomicLong(0);
-    private static final AtomicLong lastBytesOut = new AtomicLong(0);
-
-    private void handleLatency(ChannelHandlerContext ctx) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        try {
-            var client = Proxy.getInstance().getClient();
-            boolean connected = client != null && client.isConnected();
-            long botLatency = connected ? client.getPing() : -1;
-            data.put("connected", connected);
-            data.put("botLatency", botLatency);
-
-            List<Map<String, Object>> players = new ArrayList<>();
-            for (var session : Proxy.getInstance().getActiveConnections().getArray()) {
-                Map<String, Object> p = new LinkedHashMap<>();
-                p.put("name", session.getName());
-                p.put("uuid", session.getUUID().toString());
-                p.put("ping", session.getPing());
-                players.add(p);
-            }
-            data.put("players", players);
-        } catch (Exception e) {
-            data.put("connected", false);
-            data.put("botLatency", -1);
-            data.put("players", new ArrayList<>());
-        }
-        sendJson(ctx, data);
-    }
-
-    private void handlePlayer(ChannelHandlerContext ctx) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        try {
-            var client = Proxy.getInstance().getClient();
-            boolean connected = client != null && client.isConnected();
-            data.put("connected", connected);
-
-            if (connected) {
-                var playerCache = CACHE.getPlayerCache();
-                var thePlayer = playerCache.getThePlayer();
-                if (thePlayer != null) {
-                    data.put("health", thePlayer.getHealth());
-                    data.put("food", thePlayer.getFood());
-                    data.put("saturation", thePlayer.getSaturation());
-                } else {
-                    data.put("health", null);
-                    data.put("food", null);
-                    data.put("saturation", null);
-                }
-            } else {
-                data.put("health", null);
-                data.put("food", null);
-                data.put("saturation", null);
-            }
-        } catch (Exception e) {
-            data.put("connected", false);
-            data.put("health", null);
-            data.put("food", null);
-            data.put("saturation", null);
-        }
-        sendJson(ctx, data);
-    }
 
     private Map<String, Object> buildDashboardData() {
         Map<String, Object> data = new LinkedHashMap<>();
