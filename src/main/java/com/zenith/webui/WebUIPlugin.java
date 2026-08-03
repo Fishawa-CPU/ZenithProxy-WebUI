@@ -1,6 +1,9 @@
 package com.zenith.webui;
 
 import com.zenith.webui.config.ConfigManager;
+import com.zenith.webui.auth.AuthManager;
+import com.zenith.webui.auth.AuthHandler;
+import com.zenith.webui.auth.AuthController;
 import com.zenith.Proxy;
 import com.zenith.command.api.Command;
 import com.zenith.command.api.CommandCategory;
@@ -70,6 +73,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private PluginAPI api;
     private WebUILogHandler logHandler;
     private ConfigManager configManager;
+    private AuthManager authManager;
+    private AuthHandler authHandler;
+    private AuthController authController;
 
     static WebUIPlugin instance;
 
@@ -155,6 +161,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         Path pluginDir = Path.of("plugins", PLUGIN_ID);
         configManager = new ConfigManager(pluginDir);
         configManager.loadOrCreate();
+
+        // Initialize auth manager
+        authManager = new AuthManager(configManager.getConfig().auth);
+        authHandler = new AuthHandler(authManager);
+        authController = new AuthController(authManager);
 
         pluginAPI.registerCommand(new WebUICommand());
         start();
@@ -350,6 +361,32 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             // CORS
             if (HttpMethod.OPTIONS.equals(method)) {
                 sendCorsResponse(ctx);
+                return;
+            }
+
+            // Handle auth endpoints (public)
+            if (path.equals("/api/auth/login") && HttpMethod.POST.equals(method)) {
+                authController.handleLogin(ctx, req);
+                return;
+            }
+            if (path.equals("/api/auth/logout") && HttpMethod.POST.equals(method)) {
+                authController.handleLogout(ctx, req);
+                return;
+            }
+            if (path.equals("/api/auth/status")) {
+                authController.handleStatus(ctx, req);
+                return;
+            }
+
+            // Check authentication for protected resources
+            if (!authHandler.checkAuth(req)) {
+                // API endpoints return 401
+                if (path.startsWith("/api/")) {
+                    AuthHandler.sendUnauthorized(ctx, "Authentication required");
+                    return;
+                }
+                // Other paths redirect to login
+                AuthHandler.sendRedirect(ctx, "/login.html");
                 return;
             }
 

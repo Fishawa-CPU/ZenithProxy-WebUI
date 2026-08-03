@@ -1,5 +1,39 @@
 // ZenithProxy Web UI JavaScript
 
+// Auth check
+(async function checkAuth() {
+    try {
+        const response = await fetch('/api/auth/status', { credentials: 'include' });
+        const data = await response.json();
+        if (!data.authenticated) {
+            window.location.href = '/login.html';
+            return;
+        }
+        // Show user info
+        const userInfo = document.getElementById('userInfo');
+        const currentUser = document.getElementById('currentUser');
+        if (userInfo && currentUser) {
+            currentUser.textContent = data.username;
+            userInfo.style.display = 'block';
+        }
+    } catch (e) {
+        window.location.href = '/login.html';
+    }
+})();
+
+async function logout() {
+    try {
+        await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include'
+        });
+        localStorage.removeItem('webui_token');
+        window.location.href = '/login.html';
+    } catch (e) {
+        window.location.href = '/login.html';
+    }
+}
+
 let logs = [];
 let commandHistory = [];
 let historyIndex = -1;
@@ -100,9 +134,17 @@ function navigateTo(page) {
 // ── API ───────────────────────────────────────
 async function apiCall(endpoint, method = 'GET', body = null) {
     try {
-        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        const opts = {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        };
         if (body) opts.body = JSON.stringify(body);
         const r = await fetch(API_BASE + endpoint, opts);
+        if (r.status === 401) {
+            window.location.href = '/login.html';
+            return null;
+        }
         return await r.json();
     } catch (e) { return null; }
 }
@@ -124,7 +166,11 @@ function stopLogPolling() {
 async function fetchLogs() {
     try {
         const url = API_BASE + '/logs/live' + (lastLogId >= 0 ? `?after=${lastLogId}` : '');
-        const r = await fetch(url);
+        const r = await fetch(url, { credentials: 'include' });
+        if (r.status === 401) {
+            window.location.href = '/login.html';
+            return;
+        }
         const data = await r.json();
         if (data && data.logs && Array.isArray(data.logs)) {
             for (const log of data.logs) {
@@ -312,7 +358,14 @@ async function saveConfig() {
 }
 
 // ── Commands from server ──────────────────────
-async function loadCommands() { try { const r = await fetch(API_BASE + '/commands'); const d = await r.json(); if (Array.isArray(d) && d.length > 0) serverCommands = d.sort(); } catch (e) {} }
+async function loadCommands() {
+    try {
+        const r = await fetch(API_BASE + '/commands', { credentials: 'include' });
+        if (r.status === 401) { window.location.href = '/login.html'; return; }
+        const d = await r.json();
+        if (Array.isArray(d) && d.length > 0) serverCommands = d.sort();
+    } catch (e) {}
+}
 
 // ── Terminal ──────────────────────────────────
 function initTerminal() {
@@ -401,24 +454,6 @@ function stopLogPolling() {
     if (logPollTimer) {
         clearInterval(logPollTimer);
         logPollTimer = null;
-    }
-}
-
-async function fetchLogs() {
-    try {
-        const url = API_BASE + '/logs/live' + (lastLogId >= 0 ? `?after=${lastLogId}` : '');
-        const r = await fetch(url);
-        const data = await r.json();
-        if (data && data.logs && Array.isArray(data.logs)) {
-            for (const log of data.logs) {
-                addLogEntry(log);
-            }
-            if (data.logs.length > 0) {
-                lastLogId = data.counter - 1;
-            }
-        }
-    } catch (e) {
-        // polling failed, will retry next interval
     }
 }
 
