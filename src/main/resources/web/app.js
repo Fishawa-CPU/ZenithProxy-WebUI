@@ -229,12 +229,18 @@ async function loadDashboard() {
     const titleText = document.getElementById('titleText');
     const is3c3u = s.targetServer && s.targetServer.toLowerCase().includes('3c3u.org');
     if (is3c3u && s.connected) {
-        if (q && q.inQueue) {
-            titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入';
+        if (q && q.inQueue && q.position > 0) {
+            // 排队中，显示位置
+            titleText.textContent = `队列位置: ${q.position}`;
             titleText.style.color = 'var(--ctp-yellow)';
-        } else {
+        } else if (q && !q.inQueue) {
+            // 没有排队，已进入服务器
             titleText.textContent = '已进入';
             titleText.style.color = 'var(--ctp-green)';
+        } else {
+            // 其他情况
+            titleText.textContent = '-';
+            titleText.style.color = 'var(--ctp-overlay1)';
         }
     } else {
         titleText.textContent = '-';
@@ -325,12 +331,15 @@ async function fetchSystemStats() {
     if (titleText) {
         const is3c3u = currentTargetServer && currentTargetServer.toLowerCase().includes('3c3u.org');
         if (is3c3u && currentConnected) {
-            if (q && q.inQueue) {
-                titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入';
+            if (q && q.inQueue && q.position > 0) {
+                titleText.textContent = `队列位置: ${q.position}`;
                 titleText.style.color = 'var(--ctp-yellow)';
-            } else {
+            } else if (q && !q.inQueue) {
                 titleText.textContent = '已进入';
                 titleText.style.color = 'var(--ctp-green)';
+            } else {
+                titleText.textContent = '-';
+                titleText.style.color = 'var(--ctp-overlay1)';
             }
         } else {
             titleText.textContent = '-';
