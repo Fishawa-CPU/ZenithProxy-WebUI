@@ -11,7 +11,6 @@ import com.zenith.command.api.CommandCategory;
 import com.zenith.command.api.CommandContext;
 import com.zenith.command.api.CommandSources;
 import com.zenith.command.api.CommandUsage;
-import com.zenith.module.api.Module;
 import com.zenith.plugin.api.PluginAPI;
 import com.zenith.plugin.api.ZenithProxyPlugin;
 import io.netty.bootstrap.ServerBootstrap;
@@ -22,7 +21,6 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.CharsetUtil;
@@ -906,35 +904,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     }
 
     // NIO-based file sending with zero-copy
-    private void sendFile(ChannelHandlerContext ctx, Path file, String fileName) {
-        try {
-            long fileSize = Files.size(file);
-            String ct = "text/plain";
-            String nameLower = fileName.toLowerCase();
-            if (nameLower.endsWith(".gz")) ct = "application/gzip";
-            else if (nameLower.endsWith(".zip")) ct = "application/zip";
-
-            HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-            response.headers().set(HttpHeaderNames.CONTENT_TYPE, ct);
-            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, fileSize);
-            response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
-            ctx.write(response);
-
-            // Use FileRegion for zero-copy transfer
-            FileChannel fileChannel = FileChannel.open(file, StandardOpenOption.READ);
-            DefaultFileRegion region = new DefaultFileRegion(fileChannel, 0, fileSize);
-            ctx.write(region).addListener(future -> {
-                fileChannel.close();
-                if (!future.isSuccess()) {
-                    ctx.close();
-                }
-            });
-            ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-        } catch (Exception e) {
-            sendNotFound(ctx);
-        }
-    }
-
     private void sendBytes(ChannelHandlerContext ctx, byte[] content, String contentType) {
         ByteBuf buf = Unpooled.wrappedBuffer(content);
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
