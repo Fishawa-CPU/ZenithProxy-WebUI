@@ -64,6 +64,10 @@ const LOG_POLL_INTERVAL = 1000; // 1 second
 let terminalCmdCount = 0;
 let terminalLogCount = 0;
 
+// Server state for queue display
+let currentTargetServer = '';
+let currentConnected = false;
+
 const KNOWN_COMMANDS = [
     'help', 'connect', 'disconnect', 'reconnect', 'cancel',
     'auth', 'whitelist', 'friend', 'ignore', 'kick',
@@ -208,11 +212,21 @@ async function loadDashboard() {
     document.getElementById('proxyAddress').textContent = s.proxyAddress || '-';
     document.getElementById('mcVersion').textContent = s.version || '-';
 
-    // Queue display
+    // Save server state for queue display
+    currentTargetServer = s.targetServer || '';
+    currentConnected = s.connected || false;
+
+    // Queue display - only show for 3c3u.org server
     const titleText = document.getElementById('titleText');
-    if (q && q.inQueue) {
-        titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入队列';
-        titleText.style.color = 'var(--ctp-yellow)';
+    const is3c3u = s.targetServer && s.targetServer.toLowerCase().includes('3c3u.org');
+    if (is3c3u && s.connected) {
+        if (q && q.inQueue) {
+            titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入';
+            titleText.style.color = 'var(--ctp-yellow)';
+        } else {
+            titleText.textContent = '已进入';
+            titleText.style.color = 'var(--ctp-green)';
+        }
     } else {
         titleText.textContent = '-';
         titleText.style.color = 'var(--ctp-overlay1)';
@@ -300,9 +314,15 @@ async function fetchSystemStats() {
     // Update queue display
     const titleText = document.getElementById('titleText');
     if (titleText) {
-        if (q && q.inQueue) {
-            titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入队列';
-            titleText.style.color = 'var(--ctp-yellow)';
+        const is3c3u = currentTargetServer && currentTargetServer.toLowerCase().includes('3c3u.org');
+        if (is3c3u && currentConnected) {
+            if (q && q.inQueue) {
+                titleText.textContent = q.position > 0 ? `队列位置: ${q.position}` : '已进入';
+                titleText.style.color = 'var(--ctp-yellow)';
+            } else {
+                titleText.textContent = '已进入';
+                titleText.style.color = 'var(--ctp-green)';
+            }
         } else {
             titleText.textContent = '-';
             titleText.style.color = 'var(--ctp-overlay1)';

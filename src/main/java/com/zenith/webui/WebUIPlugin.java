@@ -432,6 +432,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         status.put("version", MC_VERSION);
         status.put("username", CONFIG.authentication.username);
         status.put("proxyAddress", CONFIG.server.getProxyAddress());
+        status.put("targetServer", CONFIG.client.server.address);
         status.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
         sendJson(ctx, status);
     }
