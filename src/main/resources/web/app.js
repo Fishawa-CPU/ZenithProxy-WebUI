@@ -66,6 +66,8 @@ let terminalLogCount = 0;
 
 // Server state for queue display
 let currentConnected = false;
+let queueConnectedTime = 0;
+const QUEUE_LOADING_DELAY = 5000; // 5 seconds loading delay
 
 const KNOWN_COMMANDS = [
     'help', 'connect', 'disconnect', 'reconnect', 'cancel',
@@ -221,26 +223,21 @@ async function loadDashboard() {
     document.getElementById('mcVersion').textContent = s.version || '-';
 
     // Save server state for queue display
+    const wasConnected = currentConnected;
     currentConnected = s.connected || false;
-
-    // Queue display
-    const titleText = document.getElementById('titleText');
-    if (s.connected) {
-        if (q && q.inQueue && q.position > 0) {
-            let text = `队列位置: ${q.position}`;
-            if (q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
-            titleText.textContent = text;
-            titleText.style.color = 'var(--ctp-yellow)';
-        } else {
-            let text = '已进入';
-            if (q && q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
-            titleText.textContent = text;
-            titleText.style.color = 'var(--ctp-green)';
-        }
-    } else {
-        titleText.textContent = '-';
-        titleText.style.color = 'var(--ctp-overlay1)';
+    if (currentConnected && !wasConnected) {
+        // Transition from disconnected → connected: start loading countdown
+        queueConnectedTime = Date.now();
     }
+    if (!currentConnected) {
+        queueConnectedTime = 0;
+    }
+    // If proxy was already connected before page load, use uptime to determine recency
+    if (currentConnected && s.uptime != null && s.uptime < QUEUE_LOADING_DELAY) {
+        queueConnectedTime = Date.now() - s.uptime;
+    }
+
+    renderQueue(q);
 
     // Player health/food display
     const statsEl = document.getElementById('playerStats');
@@ -266,7 +263,60 @@ async function loadDashboard() {
     }
     document.getElementById('version').textContent = 'v' + s.version;
 }
-function refreshDashboard() { loadDashboard(); }
+async function refreshDashboard() {
+    await loadDashboard();
+    updateRefreshHint();
+}
+
+function updateRefreshHint() {
+    const hint = document.getElementById('refreshHint');
+    if (hint) {
+        const now = new Date();
+        const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        hint.textContent = `已更新 ${time}`;
+        hint.classList.add('updated');
+        setTimeout(() => {
+            hint.textContent = '自动刷新中';
+            hint.classList.remove('updated');
+        }, 2000);
+    }
+}
+
+function renderQueue(q) {
+    const posEl = document.getElementById('queuePosText');
+    const onlineEl = document.getElementById('queueOnlineText');
+    if (!posEl) return;
+
+    if (!currentConnected) {
+        posEl.textContent = '-';
+        posEl.style.color = 'var(--ctp-overlay1)';
+        if (onlineEl) onlineEl.textContent = '';
+        return;
+    }
+
+    // 4-second loading delay on connect
+    const elapsed = Date.now() - queueConnectedTime;
+    if (elapsed < QUEUE_LOADING_DELAY) {
+        posEl.textContent = '正在加载...';
+        posEl.style.color = 'var(--ctp-overlay0)';
+        if (onlineEl) onlineEl.textContent = '';
+        return;
+    }
+
+    if (q && q.inQueue && q.position > 0) {
+        posEl.textContent = `队列位置: ${q.position}`;
+        posEl.style.color = 'var(--ctp-yellow)';
+        if (onlineEl) {
+            onlineEl.textContent = q.onlinePlayers > 0 ? `在线人数: ${q.onlinePlayers}` : '';
+        }
+    } else {
+        posEl.textContent = '已进入';
+        posEl.style.color = 'var(--ctp-green)';
+        if (onlineEl) {
+            onlineEl.textContent = q && q.onlinePlayers > 0 ? `在线人数: ${q.onlinePlayers}` : '';
+        }
+    }
+}
 
 // ── System Charts ─────────────────────────────
 const chartColors = {
@@ -313,34 +363,24 @@ function initCharts() {
 }
 
 let systemPollTimer = null;
-function startSystemPolling() { if (systemPollTimer) return; fetchSystemStats(); systemPollTimer = setInterval(fetchSystemStats, 5000); }
-function stopSystemPolling() { if (systemPollTimer) { clearInterval(systemPollTimer); systemPollTimer = null; } }
+const SYSTEM_POLL_INTERVAL = 1000;
+
+function startSystemPolling() {
+    if (systemPollTimer) return;
+    fetchSystemStats();
+    systemPollTimer = setInterval(fetchSystemStats, SYSTEM_POLL_INTERVAL);
+}
+
+function stopSystemPolling() {
+    if (systemPollTimer) { clearInterval(systemPollTimer); systemPollTimer = null; }
+}
 
 async function fetchSystemStats() {
     if (currentPage !== 'dashboard') { stopSystemPolling(); return; }
     const [sys, lat, q] = await Promise.all([apiCall('/system'), apiCall('/latency'), apiCall('/queue')]);
     const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    // Update queue display
-    const titleText = document.getElementById('titleText');
-    if (titleText) {
-        if (currentConnected) {
-            if (q && q.inQueue && q.position > 0) {
-                let text = `队列位置: ${q.position}`;
-                if (q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
-                titleText.textContent = text;
-                titleText.style.color = 'var(--ctp-yellow)';
-            } else {
-                let text = '已进入';
-                if (q && q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
-                titleText.textContent = text;
-                titleText.style.color = 'var(--ctp-green)';
-            }
-        } else {
-            titleText.textContent = '-';
-            titleText.style.color = 'var(--ctp-overlay1)';
-        }
-    }
+    renderQueue(q);
     if (sys && cpuChart) { cpuChart.data.datasets[0].data.push(Math.max(0, sys.cpuLoad || 0)); cpuChart.data.labels.push(now); if (cpuChart.data.datasets[0].data.length > MAX_DATA_POINTS) { cpuChart.data.datasets[0].data.shift(); cpuChart.data.labels.shift(); } cpuChart.update('none'); }
     if (sys && memoryChart) { memoryChart.data.datasets[0].data.push(sys.memoryPercent || 0); memoryChart.data.labels.push(now); if (memoryChart.data.datasets[0].data.length > MAX_DATA_POINTS) { memoryChart.data.datasets[0].data.shift(); memoryChart.data.labels.shift(); } memoryChart.update('none'); }
     if (sys && networkChart) { networkChart.data.datasets[0].data.push(Math.round((sys.netBytesPerSecIn || 0) / 1024 * 10) / 10); networkChart.data.datasets[1].data.push(Math.round((sys.netBytesPerSecOut || 0) / 1024 * 10) / 10); networkChart.data.labels.push(now); if (networkChart.data.datasets[0].data.length > MAX_DATA_POINTS) { networkChart.data.datasets[0].data.shift(); networkChart.data.datasets[1].data.shift(); networkChart.data.labels.shift(); } networkChart.update('none'); }

@@ -1093,6 +1093,31 @@ body {
     margin-left: 4px;
 }
 
+/* ── Queue lines ───────────────────────────── */
+.queue-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.queue-sub {
+    font-size: 0.8rem !important;
+    font-weight: 400 !important;
+    color: var(--ctp-overlay0);
+}
+
+/* ── Refresh hint ──────────────────────────── */
+.refresh-hint {
+    font-size: 0.75rem;
+    color: var(--ctp-overlay0);
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s;
+}
+.refresh-hint:hover {
+    color: var(--ctp-text);
+}
+
 /* ── Whitelist ──────────────────────────────── */
 .whitelist-section {
     background-color: var(--ctp-surface0);
