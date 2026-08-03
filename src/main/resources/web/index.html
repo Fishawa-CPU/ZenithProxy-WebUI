@@ -154,19 +154,28 @@
                     </div>
                 </div>
                 <div class="terminal-container">
+                    <div class="terminal-titlebar">
+                        <span class="terminal-title">root@zenith — ssh</span>
+                        <span class="terminal-status" id="terminalStatus">已连接</span>
+                    </div>
                     <div class="terminal-output" id="terminalOutput">
                         <div class="terminal-welcome">
-                            <p style="color:var(--ctp-green);">ZenithProxy Terminal v26.1.2</p>
-                            <p style="color:var(--ctp-overlay1);">Type 'help' for available commands</p>
-                            <p style="color:var(--ctp-overlay0);font-size:0.75rem;">Tab: autocomplete | Up/Down: history | PgUp/PgDn: scroll</p>
+                            <p style="color:var(--ctp-green);">Welcome to ZenithProxy Terminal</p>
+                            <p style="color:var(--ctp-overlay1);">Last login: <span id="lastLogin"></span></p>
+                            <p style="color:var(--ctp-overlay0);font-size:0.75rem;margin-top:4px;">Type 'help' for available commands | Tab: autocomplete | Up/Down: history | Ctrl+L: clear</p>
                         </div>
                     </div>
                     <div class="terminal-input-wrapper">
                         <div class="terminal-input-container">
-                            <span class="terminal-prompt">root@zenith $</span>
-                            <input type="text" class="terminal-input" id="terminalInput" placeholder="输入命令... / Type command... (Tab 补全)" autocomplete="off" spellcheck="false" autofocus>
+                            <span class="terminal-prompt">root@zenith:~$</span>
+                            <input type="text" class="terminal-input" id="terminalInput" placeholder="输入命令... / Type command..." autocomplete="off" spellcheck="false" autofocus>
                         </div>
                         <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+                    </div>
+                    <div class="terminal-statusbar">
+                        <span>HTTP 轮询模式</span>
+                        <span id="terminalCmdCount">命令数: 0</span>
+                        <span id="terminalLogCount">日志数: 0</span>
                     </div>
                 </div>
             </section>

@@ -21,6 +21,23 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.Executors;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.IThrowableProxy;
+import ch.qos.logback.core.UnsynchronizedAppenderBase;
+
+import com.zenith.event.chat.PublicChatEvent;
+import com.zenith.event.chat.SystemChatEvent;
+import com.zenith.event.chat.WhisperChatEvent;
+import com.zenith.event.chat.DeathMessageChatEvent;
+import com.zenith.event.client.ClientConnectEvent;
+import com.zenith.event.client.ClientOnlineEvent;
+import com.zenith.event.client.ClientDisconnectEvent;
+import com.zenith.event.queue.QueueStartEvent;
+import com.zenith.event.queue.QueuePositionUpdateEvent;
+import com.zenith.event.queue.QueueCompleteEvent;
+
 import static com.zenith.Globals.*;
 import static com.mojang.brigadier.arguments.IntegerArgumentType.getInteger;
 import static com.mojang.brigadier.arguments.IntegerArgumentType.integer;
@@ -34,9 +51,27 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private HttpServer httpServer;
     private WebSocketServer webSocketServer;
     private PluginAPI api;
+    private WebUILogHandler logHandler;
+
+    // Static reference for log handler
+    static WebUIPlugin instance;
+
+    // Log buffer for HTTP polling
+    private static final int LOG_BUFFER_MAX = 500;
+    private static final LinkedList<Map<String, Object>> logBuffer = new LinkedList<>();
+    private static long logPollCounter = 0;
+
+    // Convert Adventure Component to plain text (no ANSI codes)
+    private static net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer LEGACY_SERIALIZER =
+        net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection();
+    private static String componentToPlainText(net.kyori.adventure.text.Component component) {
+        if (component == null) return "";
+        return LEGACY_SERIALIZER.serialize(component);
+    }
 
     @Override
     public void onLoad(PluginAPI pluginAPI) {
+        instance = this;
         this.api = pluginAPI;
         loadOrCreateConfig();
         pluginAPI.registerCommand(new WebUICommand());
@@ -92,6 +127,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             httpServer.createContext("/api/players", new PlayersHandler());
             httpServer.createContext("/api/queue", new QueueHandler());
             httpServer.createContext("/api/logs", new LogsFileHandler());
+            httpServer.createContext("/api/logs/live", new LogPollHandler());
             httpServer.createContext("/api/system", new SystemHandler());
             httpServer.createContext("/api/latency", new LatencyHandler());
             httpServer.createContext("/", new StaticFileHandler());
@@ -100,17 +136,68 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             webSocketServer.start();
 
             httpServer.start();
+
+            // Register Logback appender to capture all SLF4J logs
+            logHandler = new WebUILogHandler();
+            LoggerContext context = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
+            context.getLogger(Logger.ROOT_LOGGER_NAME).addAppender(logHandler);
+            logHandler.start();
+
+            // Subscribe to ZenithProxy events
+            EVENT_BUS.subscribe(this, PublicChatEvent.class, e ->
+                broadcastLog("CHAT", "Chat", "<" + e.sender().getName() + "> " + componentToPlainText(e.component())));
+            EVENT_BUS.subscribe(this, SystemChatEvent.class, e ->
+                broadcastLog("INFO", "System", componentToPlainText(e.component())));
+            EVENT_BUS.subscribe(this, WhisperChatEvent.class, e -> {
+                String dir = e.outgoing() ? "→" : "←";
+                broadcastLog("CHAT", "Whisper", dir + " " + e.sender().getName() + " → " + e.receiver().getName() + ": " + componentToPlainText(e.component()));
+            });
+            EVENT_BUS.subscribe(this, DeathMessageChatEvent.class, e ->
+                broadcastLog("INFO", "Death", componentToPlainText(e.component())));
+            EVENT_BUS.subscribe(this, ClientConnectEvent.class, e ->
+                broadcastLog("INFO", "Client", "正在连接服务器... / Connecting to server..."));
+            EVENT_BUS.subscribe(this, ClientOnlineEvent.class, e ->
+                broadcastLog("INFO", "Client", "已上线 / Now online"));
+            EVENT_BUS.subscribe(this, ClientDisconnectEvent.class, e ->
+                broadcastLog("WARN", "Client", "已断开: " + e.reason() + " / Disconnected: " + e.reason()));
+            EVENT_BUS.subscribe(this, QueueStartEvent.class, e ->
+                broadcastLog("INFO", "Queue", "已进入队列 / Entered queue"));
+            EVENT_BUS.subscribe(this, QueuePositionUpdateEvent.class, e ->
+                broadcastLog("INFO", "Queue", "队列位置: " + e.position() + " / Queue position: " + e.position()));
+            EVENT_BUS.subscribe(this, QueueCompleteEvent.class, e ->
+                broadcastLog("INFO", "Queue", "队列完成，已进入服务器 / Queue complete, entering server"));
         } catch (Exception e) {
             LOG.error("Failed to start WebUI", e);
         }
     }
 
     public void stop() {
+        // Unsubscribe from events
+        EVENT_BUS.unsubscribe(this);
+        if (logHandler != null) {
+            LoggerContext context = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
+            context.getLogger(Logger.ROOT_LOGGER_NAME).detachAppender(logHandler);
+            logHandler.stop();
+            logHandler = null;
+        }
         if (httpServer != null) httpServer.stop(0);
         if (webSocketServer != null) webSocketServer.stop();
+        instance = null;
     }
 
     public void broadcastLog(String level, String logger, String message) {
+        // Store in buffer for HTTP polling
+        synchronized (logBuffer) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("level", level);
+            entry.put("logger", logger);
+            entry.put("message", message);
+            entry.put("timestamp", System.currentTimeMillis());
+            entry.put("id", logPollCounter++);
+            logBuffer.addLast(entry);
+            while (logBuffer.size() > LOG_BUFFER_MAX) logBuffer.removeFirst();
+        }
+        // Also send via WebSocket if available
         if (webSocketServer != null) webSocketServer.broadcastLog(level, logger, message);
     }
 
@@ -351,6 +438,26 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
+    private static class LogPollHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            String query = exchange.getRequestURI().getQuery();
+            long afterId = -1;
+            if (query != null && query.startsWith("after=")) {
+                try { afterId = Long.parseLong(query.substring(6)); } catch (NumberFormatException ignored) {}
+            }
+            List<Map<String, Object>> result = new ArrayList<>();
+            synchronized (logBuffer) {
+                for (Map<String, Object> entry : logBuffer) {
+                    long id = (long) entry.get("id");
+                    if (id > afterId) result.add(entry);
+                }
+            }
+            sendJson(exchange, Map.of("logs", result, "counter", logPollCounter));
+        }
+    }
+
     private static class SystemHandler implements HttpHandler {
         private static long lastNetworkTime = 0;
         private static long lastBytesIn = 0;
@@ -530,5 +637,33 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         if (path.endsWith(".png")) return "image/png";
         if (path.endsWith(".svg")) return "image/svg+xml";
         return "application/octet-stream";
+    }
+
+    // Logback Appender - intercepts all SLF4J/Logback logs
+    private static class WebUILogHandler extends UnsynchronizedAppenderBase<ILoggingEvent> {
+        private static final String[] IGNORED_PREFIXES = {
+            "com.sun.net.httpserver",
+            "jdk.httpserver"
+        };
+
+        @Override
+        protected void append(ILoggingEvent event) {
+            if (instance == null) return;
+            // Filter out DEBUG level
+            if (event.getLevel() == ch.qos.logback.classic.Level.DEBUG) return;
+            String logger = event.getLoggerName();
+            if (logger == null || logger.isEmpty()) logger = "root";
+            // Filter out HTTP server logs
+            for (String prefix : IGNORED_PREFIXES) {
+                if (logger.startsWith(prefix)) return;
+            }
+            String level = event.getLevel().toString();
+            String message = event.getFormattedMessage().replaceAll("\\x1B\\[[0-9;]*[A-Za-z]", "");
+            IThrowableProxy tp = event.getThrowableProxy();
+            if (tp != null) {
+                message += " " + tp.getClassName() + (tp.getMessage() != null ? ": " + tp.getMessage() : "");
+            }
+            instance.broadcastLog(level, logger, message);
+        }
     }
 }

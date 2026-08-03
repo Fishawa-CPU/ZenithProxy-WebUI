@@ -475,17 +475,41 @@ body {
     background-color: var(--ctp-crust);
     border: 1px solid var(--ctp-surface1);
     font-family: 'JetBrains Mono', 'Menlo', 'Ubuntu Mono', monospace;
+    overflow: hidden;
+}
+
+.terminal-titlebar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background-color: var(--ctp-mantle);
+    border-bottom: 1px solid var(--ctp-surface1);
+    font-size: 0.78rem;
+}
+
+.terminal-title {
+    color: var(--ctp-text);
+    font-weight: 500;
+}
+
+.terminal-status {
+    color: var(--ctp-green);
+    font-size: 0.72rem;
 }
 
 .terminal-output {
     height: 560px;
     overflow-y: auto;
     padding: 16px;
+    scroll-behavior: smooth;
 }
 
 .terminal-welcome {
     color: var(--ctp-overlay1);
     margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed var(--ctp-surface1);
 }
 
 .terminal-welcome p {
@@ -498,6 +522,7 @@ body {
     word-wrap: break-word;
     font-size: 0.82rem;
     line-height: 1.5;
+    white-space: pre-wrap;
 }
 
 .terminal-line-command {
@@ -898,4 +923,56 @@ body {
     .players-table tr:hover {
         background-color: transparent;
     }
+}
+
+/* Terminal status bar */
+.terminal-statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 16px;
+    background-color: var(--ctp-mantle);
+    border-top: 1px solid var(--ctp-surface1);
+    font-size: 0.7rem;
+    color: var(--ctp-overlay0);
+}
+
+.terminal-statusbar span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Terminal command separator */
+.terminal-line-command::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: var(--ctp-mauve);
+    margin-right: 8px;
+    vertical-align: middle;
+    opacity: 0.6;
+}
+
+/* Terminal output indentation */
+.terminal-line-output {
+    padding-left: 16px;
+    border-left: 2px solid var(--ctp-surface1);
+    margin-left: 4px;
+}
+
+/* Terminal error styling */
+.terminal-line-error {
+    padding-left: 16px;
+    border-left: 2px solid var(--ctp-red);
+    margin-left: 4px;
+    background-color: rgba(237, 135, 150, 0.05);
+}
+
+/* Terminal info styling */
+.terminal-line-info {
+    padding-left: 16px;
+    border-left: 2px solid var(--ctp-sapphire);
+    margin-left: 4px;
 }

@@ -1,10 +1,8 @@
 // ZenithProxy Web UI JavaScript
 
-let ws = null;
 let logs = [];
 let commandHistory = [];
 let historyIndex = -1;
-let wsPort = 8081;
 const API_BASE = window.location.origin + '/api';
 
 let autocompleteIndex = -1;
@@ -17,6 +15,15 @@ const MAX_TERMINAL_LINES = 500;
 let terminalScrollLocked = true;
 let currentPage = 'dashboard';
 let chartsInitialized = false;
+
+// Log polling state
+let lastLogId = -1;
+let logPollTimer = null;
+const LOG_POLL_INTERVAL = 1000; // 1 second
+
+// Terminal command tracking
+let terminalCmdCount = 0;
+let terminalLogCount = 0;
 
 const KNOWN_COMMANDS = [
     'help', 'connect', 'disconnect', 'reconnect', 'cancel',
@@ -56,13 +63,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     initTerminal();
     initConfigTabs();
 
-    // Fetch status first to get correct wsPort
-    const s = await apiCall('/status');
-    if (s && s.websocketPort) wsPort = s.websocketPort;
-
     loadDashboard();
     loadCommands();
-    initWebSocket();
+    startLogPolling();
 });
 
 // ── Navigation ────────────────────────────────
@@ -101,7 +104,6 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 async function loadDashboard() {
     const s = await apiCall('/status');
     if (!s) return;
-    if (s.websocketPort) wsPort = s.websocketPort;
     document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
     document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
     document.getElementById('currentUsername').textContent = s.username || '-';
@@ -220,6 +222,16 @@ function initTerminal() {
     const output = document.getElementById('terminalOutput');
     output.tabIndex = 0;
 
+    // Set last login time
+    const lastLoginEl = document.getElementById('lastLogin');
+    if (lastLoginEl) {
+        lastLoginEl.textContent = new Date().toLocaleString('zh-CN', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            hour12: false
+        });
+    }
+
     output.addEventListener('wheel', () => { setTimeout(() => { terminalScrollLocked = output.scrollHeight - output.scrollTop - output.clientHeight < 60; }, 0); }, { passive: true });
     output.addEventListener('keydown', (e) => {
         if (e.key === 'PageUp') { e.preventDefault(); output.scrollTop -= output.clientHeight - 40; terminalScrollLocked = false; }
@@ -235,21 +247,35 @@ function initTerminal() {
             if (e.key === 'Escape') { hideAutocomplete(); return; }
             if (e.key === 'Enter' && autocompleteIndex >= 0) { e.preventDefault(); selectAutocomplete(); return; }
         }
-        if (e.key === 'Enter') { e.preventDefault(); const cmd = input.value; input.value = ''; hideAutocomplete(); sendTerminalCommand(cmd); }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const cmd = input.value;
+            input.value = '';
+            hideAutocomplete();
+            sendTerminalCommand(cmd);
+        }
         else if (e.key === 'ArrowUp') { e.preventDefault(); if (historyIndex < commandHistory.length - 1) { historyIndex++; input.value = commandHistory[commandHistory.length - 1 - historyIndex]; } }
         else if (e.key === 'ArrowDown') { e.preventDefault(); if (historyIndex > 0) { historyIndex--; input.value = commandHistory[commandHistory.length - 1 - historyIndex]; } else { historyIndex = -1; input.value = ''; } }
         else if (e.key === 'Tab') { e.preventDefault(); showAutocomplete(input.value); }
+        // Ctrl+L to clear
+        else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); clearTerminal(); }
+        // Ctrl+C to cancel
+        else if (e.key === 'c' && e.ctrlKey && !window.getSelection().toString()) { e.preventDefault(); appendTerminalLine('^C', 'terminal-line-info'); input.value = ''; }
     });
     input.addEventListener('input', hideAutocomplete);
     document.addEventListener('click', (e) => { if (!e.target.closest('.terminal-input-wrapper')) hideAutocomplete(); });
+
+    updateTerminalStatus();
 }
 
-// Execute command via HTTP POST (reliable)
+// Execute command via HTTP POST
 async function sendTerminalCommand(command) {
     if (!command.trim()) return;
     commandHistory.push(command);
     historyIndex = -1;
-    appendTerminalLine(`root@zenith $ ${command}`, 'terminal-line-command');
+    terminalCmdCount++;
+    updateTerminalCounts();
+    appendTerminalLine(`root@zenith:~$ ${command}`, 'terminal-line-command');
 
     const result = await apiCall('/commands', 'POST', { command });
     if (result) {
@@ -262,6 +288,38 @@ async function sendTerminalCommand(command) {
         }
     } else {
         appendTerminalLine('请求失败 / Request failed', 'terminal-line-error');
+    }
+}
+
+// ── Log Polling (HTTP) ────────────────────────
+function startLogPolling() {
+    if (logPollTimer) return;
+    fetchLogs(); // fetch immediately
+    logPollTimer = setInterval(fetchLogs, LOG_POLL_INTERVAL);
+}
+
+function stopLogPolling() {
+    if (logPollTimer) {
+        clearInterval(logPollTimer);
+        logPollTimer = null;
+    }
+}
+
+async function fetchLogs() {
+    try {
+        const url = API_BASE + '/logs/live' + (lastLogId >= 0 ? `?after=${lastLogId}` : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        if (data && data.logs && Array.isArray(data.logs)) {
+            for (const log of data.logs) {
+                addLogEntry(log);
+            }
+            if (data.logs.length > 0) {
+                lastLogId = data.counter - 1;
+            }
+        }
+    } catch (e) {
+        // polling failed, will retry next interval
     }
 }
 
@@ -283,6 +341,8 @@ function hideAutocomplete() { autocompleteIndex = -1; const d = document.getElem
 // ── Terminal output ───────────────────────────
 function addLogEntry(log) {
     logs.push(log);
+    terminalLogCount++;
+    updateTerminalCounts();
     const output = document.getElementById('terminalOutput');
     if (!output) return;
     const entry = document.createElement('div');
@@ -303,36 +363,53 @@ function appendTerminalLine(text, className) {
     if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
     while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);
 }
-function clearTerminal() { document.getElementById('terminalOutput').innerHTML = '<div class="terminal-welcome"><p style="color:var(--ctp-green);">ZenithProxy Terminal v26.1.2</p><p style="color:var(--ctp-overlay1);">Type \'help\' for available commands</p><p style="color:var(--ctp-overlay0);font-size:0.75rem;">Tab: autocomplete | Up/Down: history | PgUp/PgDn: scroll</p></div>'; logs = []; }
-function exportTerminalContent() { const output = document.getElementById('terminalOutput'); const lines = []; const now = new Date().toISOString().replace('T', ' ').slice(0, 19); lines.push('='.repeat(60), `ZenithProxy Terminal Export — ${now}`, '='.repeat(60), ''); for (const el of output.children) lines.push(el.textContent); if (commandHistory.length > 0) { lines.push('', '-'.repeat(60), 'Command History', '-'.repeat(60)); commandHistory.forEach((c, i) => lines.push(`  [${i + 1}] ${c}`)); } lines.push('', '='.repeat(60), 'End'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })); a.download = `zenithproxy-terminal-${new Date().toISOString().split('T')[0]}.txt`; a.click(); showNotification('已导出 / Exported', 'success'); }
-
-// ── WebSocket (log streaming only) ────────────
-function initWebSocket() {
-    if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} ws = null; }
-    try {
-        ws = new WebSocket(`ws://${window.location.hostname}:${wsPort}`);
-        ws.onopen = () => updateConnectionStatus(true);
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === 'log') addLogEntry(data.data);
-            } catch (e) {}
-        };
-        ws.onclose = () => { updateConnectionStatus(false); setTimeout(initWebSocket, 5000); };
-        ws.onerror = () => {};
-    } catch (e) { setTimeout(initWebSocket, 5000); }
+function clearTerminal() {
+    document.getElementById('terminalOutput').innerHTML = `
+        <div class="terminal-welcome">
+            <p style="color:var(--ctp-green);">Welcome to ZenithProxy Terminal</p>
+            <p style="color:var(--ctp-overlay1);">Last login: <span id="lastLogin">${new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span></p>
+            <p style="color:var(--ctp-overlay0);font-size:0.75rem;margin-top:4px;">Type 'help' for available commands | Tab: autocomplete | Up/Down: history | Ctrl+L: clear</p>
+        </div>`;
+    logs = [];
+    terminalLogCount = 0;
+    terminalCmdCount = 0;
+    updateTerminalCounts();
 }
 
-function updateConnectionStatus(connected) {
-    const dot = document.querySelector('.status-dot'), text = document.querySelector('.status-text');
-    if (connected) { dot.className = 'status-dot connected'; text.innerHTML = '已连接'; }
-    else { dot.className = 'status-dot disconnected'; text.innerHTML = '未连接'; }
+let terminalCmdCountDisplay = 0;
+let terminalLogCountDisplay = 0;
+
+function updateTerminalCounts() {
+    const cmdEl = document.getElementById('terminalCmdCount');
+    const logEl = document.getElementById('terminalLogCount');
+    if (cmdEl) cmdEl.textContent = `命令数: ${terminalCmdCount}`;
+    if (logEl) logEl.textContent = `日志数: ${terminalLogCount}`;
 }
 
-function updateDashboardStatus(s) {
-    if (!s) return;
-    document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
-    document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
+function updateTerminalStatus() {
+    const statusEl = document.getElementById('terminalStatus');
+    if (statusEl) {
+        statusEl.textContent = '已连接';
+        statusEl.style.color = 'var(--ctp-green)';
+    }
+}
+
+function exportTerminalContent() {
+    const output = document.getElementById('terminalOutput');
+    const lines = [];
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    lines.push('='.repeat(60), `ZenithProxy Terminal Export — ${now}`, '='.repeat(60), '');
+    for (const el of output.children) lines.push(el.textContent);
+    if (commandHistory.length > 0) {
+        lines.push('', '-'.repeat(60), 'Command History', '-'.repeat(60));
+        commandHistory.forEach((c, i) => lines.push(`  [${i + 1}] ${c}`));
+    }
+    lines.push('', '='.repeat(60), 'End');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }));
+    a.download = `zenithproxy-terminal-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    showNotification('已导出 / Exported', 'success');
 }
 
 // ── Players ───────────────────────────────────
