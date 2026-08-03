@@ -282,7 +282,6 @@ body {
     grid-template-columns: repeat(4, 1fr);
     gap: 2px;
     background-color: var(--ctp-surface1);
-    border: 1px solid var(--ctp-surface1);
     margin-bottom: 16px;
     overflow: hidden;
 }
@@ -372,10 +371,10 @@ body {
 
 .stat-card {
     background-color: var(--ctp-surface0);
-    padding: 18px;
+    padding: 16px;
     display: flex;
     align-items: center;
-    border: 1px solid var(--ctp-surface1);
+    border: none;
 }
 
 .stat-icon {
@@ -407,7 +406,7 @@ body {
 
 .chart-card {
     background-color: var(--ctp-surface0);
-    border: 1px solid var(--ctp-surface1);
+    border: none;
     padding: 16px;
 }
 
@@ -472,7 +471,6 @@ body {
 .config-container {
     background-color: var(--ctp-surface0);
     overflow: hidden;
-    border: 1px solid var(--ctp-surface1);
 }
 
 .config-tabs {
@@ -560,7 +558,6 @@ body {
 /* ── Terminal ───────────────────────────────── */
 .terminal-container {
     background-color: var(--ctp-crust);
-    border: 1px solid var(--ctp-surface1);
     font-family: 'JetBrains Mono', 'Menlo', 'Ubuntu Mono', monospace;
     overflow: hidden;
 }
@@ -755,7 +752,6 @@ body {
 /* ── Players ────────────────────────────────── */
 .players-container {
     background-color: var(--ctp-surface0);
-    border: 1px solid var(--ctp-surface1);
     overflow-x: auto;
     margin-bottom: 20px;
 }
@@ -1122,7 +1118,6 @@ body {
 /* ── Whitelist ──────────────────────────────── */
 .whitelist-section {
     background-color: var(--ctp-surface0);
-    border: 1px solid var(--ctp-surface1);
     padding: 20px;
 }
 
