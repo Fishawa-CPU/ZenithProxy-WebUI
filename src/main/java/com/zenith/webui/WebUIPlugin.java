@@ -230,16 +230,30 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             logHandler.start();
 
             // Subscribe to ZenithProxy events
-            EVENT_BUS.subscribe(this, PublicChatEvent.class, e ->
-                broadcastLog("CHAT", "Chat", "<" + e.sender().getName() + "> " + componentToPlainText(e.component())));
-            EVENT_BUS.subscribe(this, SystemChatEvent.class, e ->
-                broadcastLog("INFO", "System", componentToPlainText(e.component())));
-            EVENT_BUS.subscribe(this, WhisperChatEvent.class, e -> {
-                String dir = e.outgoing() ? "→" : "←";
-                broadcastLog("CHAT", "Whisper", dir + " " + e.sender().getName() + " → " + e.receiver().getName() + ": " + componentToPlainText(e.component()));
+            EVENT_BUS.subscribe(this, PublicChatEvent.class, e -> {
+                try {
+                    String name = e.sender() != null ? e.sender().getName() : "Unknown";
+                    broadcastLog("CHAT", "Chat", "<" + name + "> " + componentToPlainText(e.component()));
+                } catch (Exception ignored) {}
             });
-            EVENT_BUS.subscribe(this, DeathMessageChatEvent.class, e ->
-                broadcastLog("INFO", "Death", componentToPlainText(e.component())));
+            EVENT_BUS.subscribe(this, SystemChatEvent.class, e -> {
+                try {
+                    broadcastLog("INFO", "System", componentToPlainText(e.component()));
+                } catch (Exception ignored) {}
+            });
+            EVENT_BUS.subscribe(this, WhisperChatEvent.class, e -> {
+                try {
+                    String dir = e.outgoing() ? "→" : "←";
+                    String from = e.sender() != null ? e.sender().getName() : "Unknown";
+                    String to = e.receiver() != null ? e.receiver().getName() : "Unknown";
+                    broadcastLog("CHAT", "Whisper", dir + " " + from + " → " + to + ": " + componentToPlainText(e.component()));
+                } catch (Exception ignored) {}
+            });
+            EVENT_BUS.subscribe(this, DeathMessageChatEvent.class, e -> {
+                try {
+                    broadcastLog("INFO", "Death", componentToPlainText(e.component()));
+                } catch (Exception ignored) {}
+            });
             EVENT_BUS.subscribe(this, ClientConnectEvent.class, e ->
                 broadcastLog("INFO", "Client", "正在连接服务器... / Connecting to server..."));
             EVENT_BUS.subscribe(this, ClientOnlineEvent.class, e ->

@@ -131,7 +131,7 @@ function showTitle(text) {
         titleCard = document.getElementById('titleCard');
         titleText = document.getElementById('titleText');
     }
-    titleText.textContent = (text && text.trim()) ? text : '-';
+    titleText.textContent = (text && text.trim()) ? text.trim() : '-';
 }
 
 // ── Dashboard ─────────────────────────────────
@@ -145,18 +145,12 @@ async function loadDashboard() {
     document.getElementById('mcVersion').textContent = s.version || '-';
 
     // Player health/food display
-    const healthEl = document.getElementById('playerHealth');
-    const foodEl = document.getElementById('playerFood');
+    const statsEl = document.getElementById('playerStats');
     if (pl && pl.connected && pl.health !== null) {
-        healthEl.textContent = `${pl.health} / 20`;
-        healthEl.style.color = pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)';
-        foodEl.textContent = `${pl.food} / 20`;
-        foodEl.style.color = pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)';
+        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">♥ ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">🍖 ${pl.food}/20</span>`;
     } else {
-        healthEl.textContent = '-';
-        healthEl.style.color = 'var(--ctp-overlay1)';
-        foodEl.textContent = '-';
-        foodEl.style.color = 'var(--ctp-overlay1)';
+        statsEl.textContent = '-';
+        statsEl.style.color = 'var(--ctp-overlay1)';
     }
     if (s.uptime) {
         const h = Math.floor(s.uptime / 3600000), m = Math.floor((s.uptime % 3600000) / 60000), sec = Math.floor((s.uptime % 60000) / 1000);
