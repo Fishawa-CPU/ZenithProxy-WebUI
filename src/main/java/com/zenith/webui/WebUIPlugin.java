@@ -391,6 +391,62 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
+    // Module class name -> command name (only modules with toggle on/off support)
+    private static final Map<String, String> MODULE_COMMAND_MAP = new LinkedHashMap<>();
+    static {
+        MODULE_COMMAND_MAP.put("ActionLimiter", "actionLimiter");
+        MODULE_COMMAND_MAP.put("ActiveHours", "activeHours");
+        MODULE_COMMAND_MAP.put("AntiAFK", "antiAFK");
+        MODULE_COMMAND_MAP.put("AntiKick", "antiKick");
+        MODULE_COMMAND_MAP.put("AntiLeak", "antiLeak");
+        MODULE_COMMAND_MAP.put("AutoArmor", "autoArmor");
+        MODULE_COMMAND_MAP.put("AutoDisconnect", "autoDisconnect");
+        MODULE_COMMAND_MAP.put("AutoDrop", "autoDrop");
+        MODULE_COMMAND_MAP.put("AutoEat", "autoEat");
+        MODULE_COMMAND_MAP.put("AutoFish", "autoFish");
+        MODULE_COMMAND_MAP.put("AutoMend", "autoMend");
+        MODULE_COMMAND_MAP.put("AutoOmen", "autoOmen");
+        MODULE_COMMAND_MAP.put("AutoReconnect", "autoReconnect");
+        MODULE_COMMAND_MAP.put("AutoReply", "autoReply");
+        MODULE_COMMAND_MAP.put("AutoRespawn", "autoRespawn");
+        MODULE_COMMAND_MAP.put("AutoTotem", "autoTotem");
+        MODULE_COMMAND_MAP.put("AutoUpdate", "autoUpdate");
+        MODULE_COMMAND_MAP.put("ChatHistory", "chatHistory");
+        MODULE_COMMAND_MAP.put("ChatRelay", "chatRelay");
+        MODULE_COMMAND_MAP.put("Click", "click");
+        MODULE_COMMAND_MAP.put("ClientConnection", "clientConnection");
+        MODULE_COMMAND_MAP.put("CommandConfig", "commandConfig");
+        MODULE_COMMAND_MAP.put("ConnectionTest", "connectionTest");
+        MODULE_COMMAND_MAP.put("CoordinateObfuscation", "coordObf");
+        MODULE_COMMAND_MAP.put("Database", "database");
+        MODULE_COMMAND_MAP.put("DiscordManage", "discord");
+        MODULE_COMMAND_MAP.put("DiscordNotifications", "discordNotifications");
+        MODULE_COMMAND_MAP.put("DisplayCoords", "displayCoords");
+        MODULE_COMMAND_MAP.put("ExtraChat", "extraChat");
+        MODULE_COMMAND_MAP.put("Inventory", "inventory");
+        MODULE_COMMAND_MAP.put("KillAura", "killAura");
+        MODULE_COMMAND_MAP.put("PacketLog", "packetLog");
+        MODULE_COMMAND_MAP.put("Pathfinder", "pathfinder");
+        MODULE_COMMAND_MAP.put("Plugins", "plugins");
+        MODULE_COMMAND_MAP.put("Prio", "prio");
+        MODULE_COMMAND_MAP.put("QueueStatus", "queueStatus");
+        MODULE_COMMAND_MAP.put("QueueWarning", "queueWarning");
+        MODULE_COMMAND_MAP.put("RateLimiter", "rateLimiter");
+        MODULE_COMMAND_MAP.put("Replay", "replay");
+        MODULE_COMMAND_MAP.put("ServerConnection", "serverConnection");
+        MODULE_COMMAND_MAP.put("SessionTimeLimit", "sessionTimeLimit");
+        MODULE_COMMAND_MAP.put("Spammer", "spammer");
+        MODULE_COMMAND_MAP.put("SpawnPatrol", "spawnPatrol");
+        MODULE_COMMAND_MAP.put("Spectator", "spectator");
+        MODULE_COMMAND_MAP.put("Spook", "spook");
+        MODULE_COMMAND_MAP.put("Stalk", "stalk");
+        MODULE_COMMAND_MAP.put("Tasks", "tasks");
+        MODULE_COMMAND_MAP.put("Terminal", "terminal");
+        MODULE_COMMAND_MAP.put("ViaVersion", "via");
+        MODULE_COMMAND_MAP.put("VisualRange", "visualRange");
+        MODULE_COMMAND_MAP.put("Whitelist", "whitelist");
+    }
+
     private static class ModulesHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
@@ -408,10 +464,19 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
                     String name = json.get("name").getAsString();
                     boolean enabled = json.get("enabled").getAsBoolean();
-                    for (Module module : MODULE.getModules().toArray(new Module[0])) {
-                        if (module.getClass().getSimpleName().equals(name)) {
-                            module.setEnabled(enabled);
-                            break;
+                    String cmdName = MODULE_COMMAND_MAP.get(name);
+                    if (cmdName != null) {
+                        // Use command: `<cmd> toggle on/off`
+                        String cmd = cmdName + " toggle " + (enabled ? "on" : "off");
+                        CommandContext context = CommandContext.create(cmd, CommandSources.TERMINAL);
+                        COMMAND.execute(context);
+                    } else {
+                        // No command, use direct API
+                        for (Module module : MODULE.getModules().toArray(new Module[0])) {
+                            if (module.getClass().getSimpleName().equals(name)) {
+                                module.setEnabled(enabled);
+                                break;
+                            }
                         }
                     }
                     saveModuleState(name, enabled);
