@@ -213,7 +213,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 
 // ── Dashboard ─────────────────────────────────
 async function loadDashboard() {
-    const s = await apiCall('/status');
+    const [s, p] = await Promise.all([apiCall('/status'), apiCall('/players')]);
     if (!s) return;
     document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
     document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
@@ -224,12 +224,15 @@ async function loadDashboard() {
         const h = Math.floor(s.uptime / 3600000), m = Math.floor((s.uptime % 3600000) / 60000), sec = Math.floor((s.uptime % 60000) / 1000);
         document.getElementById('uptime').textContent = `${h}时 ${m}分 ${sec}秒`;
     }
-    if (s.inQueue) {
-        document.getElementById('queueStatus').textContent = `队列位置: ${s.queuePosition}`;
-        document.getElementById('queueStatus').style.color = 'var(--warning-color)';
+    // Player connection display
+    const pc = document.getElementById('playerConnection');
+    if (p && p.length > 0) {
+        const names = p.map(x => x.name).join(', ');
+        pc.textContent = `${p.length} 人: ${names}`;
+        pc.style.color = 'var(--success-color)';
     } else {
-        document.getElementById('queueStatus').textContent = '不在队列中';
-        document.getElementById('queueStatus').style.color = 'var(--success-color)';
+        pc.textContent = '无连接';
+        pc.style.color = 'var(--ctp-overlay1)';
     }
     document.getElementById('version').textContent = 'v' + s.version;
 }
