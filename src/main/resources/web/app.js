@@ -558,7 +558,21 @@ function exportTerminalContent() {
 }
 
 // ── Players ───────────────────────────────────
-async function loadPlayers() { const p = await apiCall('/players'); if (!p) return; const c = document.getElementById('playersList'); if (!p.length) { c.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--ctp-overlay1);">没有连接的玩家</td></tr>'; } else { c.innerHTML = p.map(x => `<tr><td>${x.name}</td><td style="font-family:monospace;font-size:0.85rem;color:var(--ctp-overlay1);">${x.uuid}</td><td><span class="player-badge ${x.type}">${x.type === 'controller' ? '控制器' : '观察者'}</span></td><td><button class="btn btn-secondary" onclick="sendTerminalCommand('/kick ${x.name}')">踢出</button></td></tr>`).join(''); } }
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+async function loadPlayers() {
+    const p = await apiCall('/players');
+    if (!p) return;
+    const c = document.getElementById('playersList');
+    if (!p.length) {
+        c.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--ctp-overlay1);">没有连接的玩家</td></tr>';
+    } else {
+        c.innerHTML = p.map(x => `<tr><td>${escapeHtml(x.name)}</td><td style="font-family:monospace;font-size:0.85rem;color:var(--ctp-overlay1);">${escapeHtml(x.uuid)}</td><td><span class="player-badge ${escapeHtml(x.type)}">${x.type === 'controller' ? '控制器' : '观察者'}</span></td><td><button class="btn btn-secondary" onclick="sendTerminalCommand('/kick ${escapeHtml(x.name)}')">踢出</button></td></tr>`).join('');
+    }
+}
 function refreshPlayers() { loadPlayers(); loadWhitelist(); }
 
 // ── Whitelist ─────────────────────────────────
@@ -574,9 +588,9 @@ async function loadWhitelist() {
     } else {
         list.innerHTML = data.whitelist.map(x =>
             `<div class="whitelist-entry">
-                <span class="whitelist-entry-name">${x.username}</span>
-                <span class="whitelist-entry-uuid">${x.uuid}</span>
-                <button class="btn btn-danger btn-sm" onclick="removeWhitelistPlayer('${x.username}')">移除</button>
+                <span class="whitelist-entry-name">${escapeHtml(x.username)}</span>
+                <span class="whitelist-entry-uuid">${escapeHtml(x.uuid)}</span>
+                <button class="btn btn-danger btn-sm" onclick="removeWhitelistPlayer('${escapeHtml(x.username)}')">移除</button>
             </div>`
         ).join('');
     }

@@ -182,7 +182,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         return webUI;
     }
 
-    private void saveModuleState(String moduleName, boolean enabled) {
+    private static void saveModuleState(String moduleName, boolean enabled) {
         try {
             com.google.gson.JsonObject root;
             if (Files.exists(CONFIG_FILE)) {
@@ -198,7 +198,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
-    private void loadModuleStates() {
+    private static void loadModuleStates() {
         try {
             if (!Files.exists(CONFIG_FILE)) return;
             com.google.gson.JsonObject root = GSON.fromJson(Files.readString(CONFIG_FILE), com.google.gson.JsonObject.class);
@@ -493,8 +493,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 List<Map<String, Object>> entries = new ArrayList<>();
                 for (var entry : CONFIG.server.extra.whitelist.whitelist) {
                     Map<String, Object> e = new LinkedHashMap<>();
-                    e.put("username", entry.username());
-                    e.put("uuid", entry.uuid().toString());
+                    e.put("username", entry.getUsername());
+                    e.put("uuid", entry.getUuid().toString());
                     entries.add(e);
                 }
                 data.put("whitelist", entries);
@@ -513,7 +513,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                             String username = json.get("username").getAsString();
                             var result = PLAYER_LISTS.getWhitelist().add(username);
                             if (result.isPresent()) {
-                                sendJson(exchange, Map.of("success", true, "username", result.get().username(), "uuid", result.get().uuid().toString()));
+                                sendJson(exchange, Map.of("success", true, "username", result.get().getUsername(), "uuid", result.get().getUuid().toString()));
                             } else {
                                 sendJson(exchange, Map.of("success", false, "error", "无法解析用户名 / Could not resolve username"));
                             }
@@ -666,9 +666,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     }
 
     private static class SystemHandler implements HttpHandler {
-        private static long lastNetworkTime = 0;
-        private static long lastBytesIn = 0;
-        private static long lastBytesOut = 0;
+        private static volatile long lastNetworkTime = 0;
+        private static volatile long lastBytesIn = 0;
+        private static volatile long lastBytesOut = 0;
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
