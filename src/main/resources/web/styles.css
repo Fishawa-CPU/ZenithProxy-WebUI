@@ -309,42 +309,6 @@ body {
     height: 160px !important;
 }
 
-/* ── Modules ────────────────────────────────── */
-.modules-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 10px;
-}
-
-.module-card {
-    background-color: var(--ctp-surface0);
-    padding: 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border: 1px solid var(--ctp-surface1);
-}
-
-.module-info h3 {
-    font-size: 0.92rem;
-    margin-bottom: 2px;
-    font-weight: 600;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.module-cn {
-    font-size: 0.72rem;
-    color: var(--ctp-overlay0);
-    font-weight: 400;
-}
-
-.module-info p {
-    font-size: 0.75rem;
-    color: var(--ctp-overlay1);
-}
-
 /* ── Toggle Switch ──────────────────────────── */
 .toggle {
     position: relative;
@@ -852,10 +816,6 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .modules-grid {
-        grid-template-columns: 1fr;
-    }
-
     .terminal-controls {
         flex-wrap: wrap;
     }
@@ -924,10 +884,6 @@ body {
 
     .stat-card:hover {
         transform: none;
-    }
-
-    .module-card:hover {
-        border-color: var(--ctp-surface1);
     }
 
     .players-table tr:hover {

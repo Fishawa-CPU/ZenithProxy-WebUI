@@ -91,7 +91,6 @@ function navigateTo(page) {
 
     switch (page) {
         case 'dashboard': loadDashboard(); initCharts(); startSystemPolling(); break;
-        case 'modules': loadModules(); break;
         case 'config': loadConfig(); break;
         case 'players': loadPlayers(); loadWhitelist(); break;
     }
@@ -220,11 +219,6 @@ async function fetchSystemStats() {
         }
     }
 }
-
-// ── Modules ───────────────────────────────────
-async function loadModules() { const m = await apiCall('/modules'); if (!m) return; document.getElementById('modulesList').innerHTML = m.map(x => `<div class="module-card"><div class="module-info"><h3>${escapeHtml(x.name)}<span class="module-cn">${escapeHtml(x.cn || '')}</span></h3><p>${x.enabled ? '已启用' : '已禁用'}</p></div><label class="toggle"><input type="checkbox" ${x.enabled ? 'checked' : ''} onchange="toggleModule('${x.name}', this.checked)"><span class="toggle-slider"></span></label></div>`).join(''); }
-async function toggleModule(name, enabled) { await apiCall('/modules', 'POST', { name, enabled }); loadModules(); }
-function refreshModules() { loadModules(); }
 
 // ── Config ────────────────────────────────────
 async function loadConfig() { const c = await apiCall('/config'); if (c) renderConfigSections(c); }
