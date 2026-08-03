@@ -110,20 +110,28 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 // ── SSE ───────────────────────────────────────
 let titleCard = null;
 let titleText = null;
+let sseConnection = null;
 
 function initSSE() {
-    const es = new EventSource(API_BASE + '/logs/stream');
-    es.onmessage = (e) => {
+    if (sseConnection) {
+        sseConnection.close();
+    }
+    sseConnection = new EventSource(API_BASE + '/logs/stream');
+    sseConnection.onmessage = (e) => {
         try {
             const data = JSON.parse(e.data);
             if (data.type === 'title') {
                 showTitle(data.text);
-            } else {
+            } else if (data.level && data.message) {
                 addLogEntry(data);
             }
         } catch (err) {}
     };
-    es.onerror = () => { es.close(); setTimeout(initSSE, 3000); };
+    sseConnection.onerror = () => {
+        sseConnection.close();
+        sseConnection = null;
+        setTimeout(initSSE, 3000);
+    };
 }
 
 function showTitle(text) {
@@ -147,7 +155,7 @@ async function loadDashboard() {
     // Player health/food display
     const statsEl = document.getElementById('playerStats');
     if (pl && pl.connected && pl.health !== null) {
-        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">♥ ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">🍖 ${pl.food}/20</span>`;
+        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">HP ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">FOOD ${pl.food}/20</span>`;
     } else {
         statsEl.textContent = '-';
         statsEl.style.color = 'var(--ctp-overlay1)';
@@ -412,6 +420,7 @@ function hideAutocomplete() { autocompleteIndex = -1; const d = document.getElem
 
 // ── Terminal output ───────────────────────────
 function addLogEntry(log) {
+    if (!log || !log.level || !log.message) return;
     logs.push(log);
     terminalLogCount++;
     updateTerminalCounts();
@@ -419,8 +428,11 @@ function addLogEntry(log) {
     if (!output) return;
     const entry = document.createElement('div');
     entry.className = 'terminal-line terminal-line-log';
-    const ts = new Date(log.timestamp).toLocaleTimeString();
-    entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${log.level.toLowerCase()}">${log.level}</span><span class="log-msg">[${log.logger}] ${log.message}</span>`;
+    const ts = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
+    const level = (log.level || 'INFO').toLowerCase();
+    const logger = log.logger || '';
+    const message = log.message || '';
+    entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${level}">${log.level}</span><span class="log-msg">[${logger}] ${message}</span>`;
     output.appendChild(entry);
     if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
     while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);
