@@ -466,8 +466,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     boolean enabled = json.get("enabled").getAsBoolean();
                     String cmdName = MODULE_COMMAND_MAP.get(name);
                     if (cmdName != null) {
-                        // Use command: `<cmd> toggle on/off`
-                        String cmd = cmdName + " toggle " + (enabled ? "on" : "off");
+                        // Use command: `<cmd> on/off`
+                        String cmd = cmdName + " " + (enabled ? "on" : "off");
                         CommandContext context = CommandContext.create(cmd, CommandSources.TERMINAL);
                         COMMAND.execute(context);
                     } else {
