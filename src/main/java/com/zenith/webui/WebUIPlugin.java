@@ -262,7 +262,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             String method = exchange.getRequestMethod();
             if ("GET".equals(method)) {
                 List<Map<String, Object>> modules = new ArrayList<>();
-                for (Module module : MODULE.getModules()) {
+                for (Module module : MODULE.getModules().toArray(new Module[0])) {
                     modules.add(Map.of("name", module.getClass().getSimpleName(), "enabled", module.isEnabled()));
                 }
                 sendJson(exchange, modules);
@@ -273,7 +273,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     String name = json.get("name").getAsString();
                     boolean enabled = json.get("enabled").getAsBoolean();
                     boolean found = false;
-                    for (Module module : MODULE.getModules()) {
+                    for (Module module : MODULE.getModules().toArray(new Module[0])) {
                         if (module.getClass().getSimpleName().equals(name)) {
                             module.setEnabled(enabled);
                             found = true;
