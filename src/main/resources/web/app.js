@@ -201,6 +201,8 @@ async function loadDashboard() {
     document.getElementById('proxyStatus').style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
     document.getElementById('currentUsername').textContent = d.username || '-';
     document.getElementById('mcVersion').textContent = d.version || '-';
+    const viaEl = document.getElementById('viaVersion');
+    if (viaEl) viaEl.textContent = d.viaVersion || '';
     document.getElementById('version').textContent = 'v' + (d.version || '?');
 
     // Connected state for queue loading
@@ -229,16 +231,12 @@ async function loadDashboard() {
         document.getElementById('playerStats').style.color = 'var(--ctp-overlay1)';
     }
 
-    // Player connection (latency players list)
-    if (d.latency && d.latency.players && d.latency.players.length > 0) {
-        const names = d.latency.players.map(x => x.name).join(', ');
-        const pc = document.getElementById('playerConnection');
-        pc.textContent = `${d.latency.players.length} 人: ${names}`;
-        pc.style.color = 'var(--success-color)';
-    } else {
-        const pc = document.getElementById('playerConnection');
-        pc.textContent = '无连接';
-        pc.style.color = 'var(--ctp-overlay1)';
+    // Player connection - simple status
+    const pc = document.getElementById('playerConnection');
+    const hasPlayers = d.latency && d.latency.players && d.latency.players.length > 0;
+    if (pc) {
+        pc.textContent = hasPlayers ? '已连接' : '无连接';
+        pc.style.color = hasPlayers ? 'var(--success-color)' : 'var(--ctp-overlay1)';
     }
 }
 function renderQueue(q) {
@@ -358,15 +356,12 @@ function processDashboardData(d) {
         statusEl.style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
     }
 
-    // Player connection count
+    // Player connection - simple status
     const pc = document.getElementById('playerConnection');
-    if (pc && d.latency && d.latency.players && d.latency.players.length > 0) {
-        const names = d.latency.players.map(x => x.name).join(', ');
-        pc.textContent = `${d.latency.players.length} 人: ${names}`;
-        pc.style.color = 'var(--success-color)';
-    } else if (pc) {
-        pc.textContent = '无连接';
-        pc.style.color = 'var(--ctp-overlay1)';
+    const hasPlayers = d.latency && d.latency.players && d.latency.players.length > 0;
+    if (pc) {
+        pc.textContent = hasPlayers ? '已连接' : '无连接';
+        pc.style.color = hasPlayers ? 'var(--success-color)' : 'var(--ctp-overlay1)';
     }
 
     // Update connected state

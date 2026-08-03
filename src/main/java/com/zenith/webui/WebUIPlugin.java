@@ -874,6 +874,18 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             data.put("queueOnlinePlayers", qd.onlinePlayers);
             data.put("queuePos", qd.queuePos);
             data.put("version", MC_VERSION);
+            // viaVersion: enabled + protocol version if auto is off
+            String viaVersionStr = "";
+            try {
+                if (CONFIG.client.viaversion != null && CONFIG.client.viaversion.enabled) {
+                    if (!CONFIG.client.viaversion.autoProtocolVersion) {
+                        viaVersionStr = "via " + CONFIG.client.viaversion.protocolVersion;
+                    } else {
+                        viaVersionStr = "via auto";
+                    }
+                }
+            } catch (Exception ignored) {}
+            data.put("viaVersion", viaVersionStr);
             data.put("username", CONFIG.authentication.username);
             data.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
 
