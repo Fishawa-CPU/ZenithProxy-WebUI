@@ -93,15 +93,7 @@ public class AuthController {
     }
 
     private String getClientIp(ChannelHandlerContext ctx, FullHttpRequest request) {
-        // Check X-Forwarded-For first (for reverse proxies)
-        String xff = request.headers().get("X-Forwarded-For");
-        if (xff != null && !xff.isEmpty()) {
-            return xff.split(",")[0].trim();
-        }
-        String xri = request.headers().get("X-Real-IP");
-        if (xri != null && !xri.isEmpty()) {
-            return xri;
-        }
+        // Use TCP remote address for rate limiting (not headers which can be spoofed)
         Channel channel = ctx.channel();
         if (channel.remoteAddress() instanceof InetSocketAddress addr) {
             return addr.getAddress().getHostAddress();
@@ -130,11 +122,14 @@ public class AuthController {
     }
 
     private String buildCookie(String token, int maxAge) {
+        // HttpOnly prevents JS access to token
+        // SameSite=Lax prevents CSRF while allowing navigation from other sites
+        // Note: For HTTPS deployments, add "; Secure" flag
         if (maxAge > 0) {
-            return String.format("webui_token=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d",
+            return String.format("webui_token=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d",
                 token, maxAge);
         }
-        return "webui_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+        return "webui_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0";
     }
 
     private void sendJson(ChannelHandlerContext ctx, HttpResponseStatus status, Object obj) {

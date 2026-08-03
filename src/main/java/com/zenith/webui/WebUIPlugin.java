@@ -88,6 +88,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     // SSE clients using Netty channels
     private static final List<Channel> sseClients = new CopyOnWriteArrayList<>();
     private static final List<Channel> dashboardSseClients = new CopyOnWriteArrayList<>();
+    private static final Map<Channel, String> sseClientTokens = new ConcurrentHashMap<>();
     private java.util.concurrent.ScheduledExecutorService dashboardStreamExecutor;
 
     // File cache for static files (path -> content)
@@ -421,8 +422,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 return;
             }
 
+            // Extract token for SSE validation
+            String token = extractToken(req);
+
             // Route to handlers
             try {
+                if (path.equals("/api/logs/stream") || path.equals("/api/dashboard/stream")) {
+                    if (token != null) sseClientTokens.put(ctx.channel(), token);
+                }
                 switch (path) {
                     case "/api/status" -> handleStatus(ctx);
                     case "/api/config" -> handleConfig(ctx, req);
@@ -454,6 +461,27 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         public void channelInactive(ChannelHandlerContext ctx) {
             sseClients.remove(ctx.channel());
             dashboardSseClients.remove(ctx.channel());
+            sseClientTokens.remove(ctx.channel());
+        }
+
+        private String extractToken(FullHttpRequest request) {
+            // Try Authorization header first
+            String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                return authHeader.substring(7);
+            }
+            // Try cookie
+            String cookieHeader = request.headers().get(HttpHeaderNames.COOKIE);
+            if (cookieHeader != null) {
+                String[] cookies = cookieHeader.split(";");
+                for (String cookie : cookies) {
+                    String[] parts = cookie.trim().split("=", 2);
+                    if (parts.length == 2 && "webui_token".equals(parts[0].trim())) {
+                        return parts[1].trim();
+                    }
+                }
+            }
+            return null;
         }
     }
 
@@ -934,12 +962,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         });
         dashboardStreamExecutor.scheduleAtFixedRate(() -> {
             try {
+                // Validate SSE tokens periodically
+                validateSSETokens();
                 if (dashboardSseClients.isEmpty()) return;
                 Map<String, Object> data = buildDashboardData();
                 String json = GSON.toJson(data);
                 String sseData = "data: " + json + "\n\n";
                 dashboardSseClients.removeIf(ch -> {
-                    if (!ch.isActive()) return true;
+                    if (!ch.isActive()) { sseClientTokens.remove(ch); return true; }
                     try {
                         ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
                         DefaultHttpContent content = new DefaultHttpContent(buf);
@@ -954,6 +984,23 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 });
             } catch (Exception ignored) {}
         }, 0, 1, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    private void validateSSETokens() {
+        // Check all SSE clients: close those with expired/invalid tokens
+        sseClientTokens.entrySet().removeIf(entry -> {
+            Channel ch = entry.getKey();
+            if (!ch.isActive()) return true;
+            String username = authManager.validateToken(entry.getValue());
+            if (username == null) {
+                // Token expired or invalid
+                ch.close();
+                sseClients.remove(ch);
+                dashboardSseClients.remove(ch);
+                return true;
+            }
+            return false;
+        });
     }
 
     private static final AtomicLong lastDashboardNetTime = new AtomicLong(0);
