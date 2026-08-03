@@ -336,7 +336,7 @@ function startSystemPolling() {
         // SSE will auto-reconnect
     };
     // Fetch once immediately via HTTP while SSE connects
-    apiCall('/api/dashboard').then(d => { if (d && currentPage === 'dashboard') processDashboardData(d); });
+    apiCall('/dashboard').then(d => { if (d && currentPage === 'dashboard') processDashboardData(d); });
 }
 
 function stopSystemPolling() {

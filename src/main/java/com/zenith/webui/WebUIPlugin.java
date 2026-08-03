@@ -552,6 +552,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream");
         response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
         response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.writeAndFlush(response);
 
         // Push recent history first so the client sees existing logs
@@ -705,6 +706,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream");
         response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
         response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.writeAndFlush(response);
         dashboardSseClients.add(ctx.channel());
     }
