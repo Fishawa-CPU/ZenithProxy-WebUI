@@ -5,9 +5,6 @@ import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Base64;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;

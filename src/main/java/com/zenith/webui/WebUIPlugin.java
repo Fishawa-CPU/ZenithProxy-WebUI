@@ -30,11 +30,13 @@ import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -1217,10 +1219,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         }
     }
 
-    private static com.google.gson.Gson GSON = new com.google.gson.GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
+    public static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder().disableHtmlEscaping().create();
 
     // Logback Appender
     private static class WebUILogHandler extends UnsynchronizedAppenderBase<ILoggingEvent> {
+        private static final java.util.regex.Pattern ANSI_PATTERN = java.util.regex.Pattern.compile("\\x1B\\[[0-9;]*[A-Za-z]");
         private static final String[] IGNORED_PREFIXES = {
             "com.sun.net.httpserver",
             "jdk.httpserver"
@@ -1236,7 +1239,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 if (logger.startsWith(prefix)) return;
             }
             String level = event.getLevel().toString();
-            String message = event.getFormattedMessage().replaceAll("\\x1B\\[[0-9;]*[A-Za-z]", "");
+            String message = ANSI_PATTERN.matcher(event.getFormattedMessage()).replaceAll("");
             IThrowableProxy tp = event.getThrowableProxy();
             if (tp != null) {
                 message += " " + tp.getClassName() + (tp.getMessage() != null ? ": " + tp.getMessage() : "");

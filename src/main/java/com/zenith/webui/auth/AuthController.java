@@ -1,8 +1,7 @@
 package com.zenith.webui.auth;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
+import com.zenith.webui.WebUIPlugin;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -17,7 +16,6 @@ import java.util.Map;
  * Handles login/logout API endpoints
  */
 public class AuthController {
-    private static final Gson GSON = new GsonBuilder().create();
     private final AuthManager authManager;
 
     public AuthController(AuthManager authManager) {
@@ -31,7 +29,7 @@ public class AuthController {
     public void handleLogin(ChannelHandlerContext ctx, FullHttpRequest request) {
         try {
             String body = request.content().toString(StandardCharsets.UTF_8);
-            JsonObject json = GSON.fromJson(body, JsonObject.class);
+            JsonObject json = WebUIPlugin.GSON.fromJson(body, JsonObject.class);
 
             if (json == null || !json.has("username") || !json.has("password")) {
                 sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
@@ -133,7 +131,7 @@ public class AuthController {
     }
 
     private void sendJson(ChannelHandlerContext ctx, HttpResponseStatus status, Object obj) {
-        String json = GSON.toJson(obj);
+        String json = WebUIPlugin.GSON.toJson(obj);
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
 
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
@@ -147,7 +145,7 @@ public class AuthController {
 
     private void sendJsonWithCookie(ChannelHandlerContext ctx, HttpResponseStatus status,
                                      Object obj, String cookie) {
-        String json = GSON.toJson(obj);
+        String json = WebUIPlugin.GSON.toJson(obj);
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
 
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);

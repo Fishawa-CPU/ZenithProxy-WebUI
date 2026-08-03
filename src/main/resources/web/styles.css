@@ -701,12 +701,6 @@ body {
 }
 
 /* Terminal controls */
-.terminal-controls {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
 /* Autocomplete dropdown */
 .autocomplete-dropdown {
     display: none;
@@ -739,9 +733,6 @@ body {
 .autocomplete-item.selected {
     background-color: var(--ctp-surface0);
     color: var(--ctp-text);
-}
-
-.autocomplete-item.selected {
     border-left: 2px solid var(--ctp-mauve);
 }
 
@@ -793,23 +784,6 @@ body {
 .player-badge.spectator {
     background-color: var(--ctp-surface2);
     color: var(--ctp-subtext1);
-}
-
-/* ── Select (shared) ────────────────────────── */
-.select {
-    padding: 8px 12px;
-    border: 1px solid var(--ctp-surface1);
-    border-radius: 4px;
-    background-color: var(--ctp-surface0);
-    color: var(--ctp-text);
-    font-size: 0.85rem;
-    font-family: inherit;
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236e738d' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 32px;
 }
 
 /* ── Bilingual ──────────────────────────────── */
@@ -885,8 +859,7 @@ body {
 
     .logo h1,
     .logo .version,
-    .nav-item .text,
-    .status-text {
+    .nav-item .text {
         display: none;
     }
 
@@ -928,10 +901,6 @@ body {
 
     .control-tile {
         padding: 16px 12px;
-    }
-
-    .terminal-controls {
-        flex-wrap: wrap;
     }
 
     .page-header h2 .en {
@@ -1016,10 +985,6 @@ body {
 
     .nav-item.active {
         background-color: var(--ctp-surface0);
-    }
-
-    .stat-card:hover {
-        transform: none;
     }
 
     .players-table tr:hover {

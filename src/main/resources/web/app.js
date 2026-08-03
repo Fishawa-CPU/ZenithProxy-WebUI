@@ -408,11 +408,11 @@ function processDashboardData(d) {
 
         const detail = document.getElementById('latencyDetail');
         if (detail) {
-            let html = `<div class="latency-item"><span class="player-name">Bot→Server</span><span class="ping-value ${getPingClass(lat.botLatency)}">${lat.botLatency}ms</span></div>`;
+            const parts = [`<div class="latency-item"><span class="player-name">Bot→Server</span><span class="ping-value ${getPingClass(lat.botLatency)}">${lat.botLatency}ms</span></div>`];
             if (lat.players && lat.players.length > 0) {
-                for (const p of lat.players) html += `<div class="latency-item"><span class="player-name">${escapeHtml(p.name)}</span><span class="ping-value ${getPingClass(p.ping)}">${escapeHtml(String(p.ping))}ms</span></div>`;
+                for (const p of lat.players) parts.push(`<div class="latency-item"><span class="player-name">${escapeHtml(p.name)}</span><span class="ping-value ${getPingClass(p.ping)}">${escapeHtml(String(p.ping))}ms</span></div>`);
             }
-            detail.innerHTML = html;
+            detail.innerHTML = parts.join('');
         }
     }
 }
@@ -423,13 +423,13 @@ function renderConfigSections(c) {
     document.getElementById('configContent').innerHTML = `
         <div class="config-section active" id="authSection"><h3>认证设置 <span class="en">Auth</span></h3>
             <div class="form-group"><label>账号类型</label><select id="accountType"><option value="DEVICE_CODE" ${c.authentication?.accountType === 'DEVICE_CODE' ? 'selected' : ''}>Device Code</option><option value="MSA" ${c.authentication?.accountType === 'MSA' ? 'selected' : ''}>MSA</option><option value="OFFLINE" ${c.authentication?.accountType === 'OFFLINE' ? 'selected' : ''}>Offline</option><option value="PRISM" ${c.authentication?.accountType === 'PRISM' ? 'selected' : ''}>Prism</option></select></div>
-            <div class="form-group"><label>用户名</label><input type="text" id="username" value="${c.authentication?.username || ''}"></div>
-            <div class="form-group"><label>密码</label><input type="password" id="password" value="${c.authentication?.password || ''}"></div>
-            <div class="form-group"><label>邮箱</label><input type="email" id="email" value="${c.authentication?.email || ''}"></div>
+            <div class="form-group"><label>用户名</label><input type="text" id="username" value="${escapeHtml(c.authentication?.username || '')}"></div>
+            <div class="form-group"><label>密码</label><input type="password" id="password" value="${escapeHtml(c.authentication?.password || '')}"></div>
+            <div class="form-group"><label>邮箱</label><input type="email" id="email" value="${escapeHtml(c.authentication?.email || '')}"></div>
         </div>
         <div class="config-section" id="clientSection"><h3>客户端设置 <span class="en">Client</span></h3>
             <div class="form-group"><label>自动连接</label><label class="toggle"><input type="checkbox" id="autoConnect" ${c.client?.autoConnect ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
-            <div class="form-group"><label>目标服务器</label><input type="text" id="targetServer" value="${c.client?.server?.address || ''}"></div>
+            <div class="form-group"><label>目标服务器</label><input type="text" id="targetServer" value="${escapeHtml(c.client?.server?.address || '')}"></div>
             <div class="form-group"><label>目标端口</label><input type="number" id="targetPort" value="${c.client?.server?.port || 25565}"></div>
         </div>
         <div class="config-section" id="serverSection"><h3>服务器设置 <span class="en">Server</span></h3>
