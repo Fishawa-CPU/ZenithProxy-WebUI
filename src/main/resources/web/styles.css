@@ -737,55 +737,6 @@ body {
 }
 
 /* ── Players ────────────────────────────────── */
-.players-container {
-    background-color: var(--ctp-surface0);
-    overflow-x: auto;
-    margin-bottom: 20px;
-}
-
-.players-table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 500px;
-}
-
-.players-table th,
-.players-table td {
-    padding: 12px 16px;
-    text-align: left;
-    border-bottom: 1px solid var(--ctp-surface1);
-}
-
-.players-table th {
-    background-color: var(--ctp-mantle);
-    font-weight: 600;
-    color: var(--ctp-overlay1);
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}
-
-.players-table tr:hover {
-    background-color: var(--ctp-surface1);
-}
-
-.player-badge {
-    padding: 2px 8px;
-    border-radius: 3px;
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.player-badge.controller {
-    background-color: var(--ctp-mauve);
-    color: var(--ctp-crust);
-}
-
-.player-badge.spectator {
-    background-color: var(--ctp-surface2);
-    color: var(--ctp-subtext1);
-}
-
 /* ── Bilingual ──────────────────────────────── */
 .bilingual {
     position: relative;
@@ -972,9 +923,6 @@ body {
         height: 320px;
     }
 
-    .players-container {
-        overflow-x: auto;
-    }
 }
 
 /* Touch device hover fix */

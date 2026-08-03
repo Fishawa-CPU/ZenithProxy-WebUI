@@ -138,7 +138,7 @@ function navigateTo(page) {
         case 'dashboard': loadDashboard(); initCharts(); startSystemPolling(); break;
         case 'config': loadConfig(); break;
         case 'terminal': refreshTerminalLogs(); break;
-        case 'players': loadPlayers(); loadWhitelist(); break;
+        case 'players': loadWhitelist(); break;
     }
     if (page !== 'dashboard') stopSystemPolling();
 }
@@ -639,17 +639,6 @@ function exportTerminalContent() {
 function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-}
-
-async function loadPlayers() {
-    const p = await apiCall('/players');
-    if (!p) return;
-    const c = document.getElementById('playersList');
-    if (!p.length) {
-        c.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--ctp-overlay1);">没有连接的玩家</td></tr>';
-    } else {
-        c.innerHTML = p.map(x => `<tr><td>${escapeHtml(x.name)}</td><td style="font-family:monospace;font-size:0.85rem;color:var(--ctp-overlay1);">${escapeHtml(x.uuid)}</td><td><span class="player-badge ${escapeHtml(x.type)}">${x.type === 'controller' ? '控制器' : '观察者'}</span></td><td><button class="btn btn-secondary" onclick="sendTerminalCommand('/kick ${escapeHtml(x.name)}')">踢出</button></td></tr>`).join('');
-    }
 }
 
 // ── Whitelist ─────────────────────────────────
