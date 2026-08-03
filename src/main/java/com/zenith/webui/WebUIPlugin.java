@@ -15,10 +15,12 @@ import com.zenith.plugin.api.ZenithProxyPlugin;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 
 import ch.qos.logback.classic.Logger;
@@ -47,9 +49,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private static final ComponentLogger LOG = ComponentLogger.logger("WebUI");
     private static final Path CONFIG_FILE = Path.of("config.json");
     private static int httpPort = 8080;
-    private static int wsPort = 8081;
     private HttpServer httpServer;
-    private WebSocketServer webSocketServer;
     private PluginAPI api;
     private WebUILogHandler logHandler;
 
@@ -60,6 +60,75 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private static final int LOG_BUFFER_MAX = 500;
     private static final LinkedList<Map<String, Object>> logBuffer = new LinkedList<>();
     private static long logPollCounter = 0;
+
+    // SSE clients
+    private static final List<HttpExchange> sseClients = new CopyOnWriteArrayList<>();
+
+    // Log message translations (English -> Chinese)
+    private static final Map<String, String> LOG_TRANSLATIONS = new LinkedHashMap<>();
+    static {
+        // Connection
+        LOG_TRANSLATIONS.put("Connecting to server", "正在连接服务器");
+        LOG_TRANSLATIONS.put("Connected to server", "已连接服务器");
+        LOG_TRANSLATIONS.put("Disconnected from server", "已从服务器断开");
+        LOG_TRANSLATIONS.put("Connection lost", "连接已丢失");
+        LOG_TRANSLATIONS.put("Reconnecting", "正在重连");
+        LOG_TRANSLATIONS.put("Reconnected", "已重连");
+        LOG_TRANSLATIONS.put("Login failed", "登录失败");
+        LOG_TRANSLATIONS.put("Login successful", "登录成功");
+        LOG_TRANSLATIONS.put("Authenticating", "正在认证");
+        LOG_TRANSLATIONS.put("Authentication failed", "认证失败");
+        // Queue
+        LOG_TRANSLATIONS.put("Queue started", "已进入队列");
+        LOG_TRANSLATIONS.put("Queue complete", "队列完成");
+        LOG_TRANSLATIONS.put("Queue position", "队列位置");
+        LOG_TRANSLATIONS.put("Left queue", "已离开队列");
+        // Player
+        LOG_TRANSLATIONS.put("Player joined", "玩家已加入");
+        LOG_TRANSLATIONS.put("Player left", "玩家已离开");
+        LOG_TRANSLATIONS.put("Now online", "已上线");
+        LOG_TRANSLATIONS.put("Now offline", "已离线");
+        // Bot
+        LOG_TRANSLATIONS.put("Bot started", "机器人已启动");
+        LOG_TRANSLATIONS.put("Bot stopped", "机器人已停止");
+        LOG_TRANSLATIONS.put("Bot crashed", "机器人已崩溃");
+        // Anti-cheat
+        LOG_TRANSLATIONS.put("Anti-cheat detected", "检测到反作弊");
+        LOG_TRANSLATIONS.put("Kicked by server", "被服务器踢出");
+        LOG_TRANSLATIONS.put("Banned by server", "被服务器封禁");
+        // Auto actions
+        LOG_TRANSLATIONS.put("AutoTotem", "自动图腾");
+        LOG_TRANSLATIONS.put("AutoEat", "自动进食");
+        LOG_TRANSLATIONS.put("AutoFish", "自动钓鱼");
+        LOG_TRANSLATIONS.put("AutoMend", "自动修补");
+        LOG_TRANSLATIONS.put("AutoDisconnect", "自动断开");
+        LOG_TRANSLATIONS.put("AutoRespawn", "自动重生");
+        LOG_TRANSLATIONS.put("AutoReply", "自动回复");
+        // Modules
+        LOG_TRANSLATIONS.put("Module enabled", "模块已启用");
+        LOG_TRANSLATIONS.put("Module disabled", "模块已禁用");
+        // Config
+        LOG_TRANSLATIONS.put("Config saved", "配置已保存");
+        LOG_TRANSLATIONS.put("Config loaded", "配置已加载");
+        // Errors
+        LOG_TRANSLATIONS.put("Error", "错误");
+        LOG_TRANSLATIONS.put("Warning", "警告");
+        LOG_TRANSLATIONS.put("Failed to", "未能");
+        // Server switch
+        LOG_TRANSLATIONS.put("Switching to server", "正在切换服务器");
+        LOG_TRANSLATIONS.put("Server switch", "服务器切换");
+    }
+
+    private static String translateLogMessage(String message) {
+        if (message == null || message.isEmpty()) return message;
+        for (var entry : LOG_TRANSLATIONS.entrySet()) {
+            if (message.contains(entry.getKey())) {
+                // Replace English with Chinese, keep the rest
+                message = message.replace(entry.getKey(), entry.getValue());
+            }
+        }
+        return message;
+    }
 
     // Convert Adventure Component to plain text (no ANSI codes)
     private static net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer LEGACY_SERIALIZER =
@@ -87,8 +156,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 if (root != null && root.has("webUI")) {
                     com.google.gson.JsonObject webUI = root.getAsJsonObject("webUI");
                     if (webUI.has("port")) httpPort = webUI.get("port").getAsInt();
-                    if (webUI.has("websocketPort")) wsPort = webUI.get("websocketPort").getAsInt();
-                    LOG.info("Loaded WebUI config: http={}, ws={}", httpPort, wsPort);
+                    LOG.info("Loaded WebUI config: http={}", httpPort);
                     return;
                 }
                 // config.json exists but no webUI section — add it
@@ -111,8 +179,42 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         com.google.gson.JsonObject webUI = new com.google.gson.JsonObject();
         webUI.addProperty("enabled", true);
         webUI.addProperty("port", 8080);
-        webUI.addProperty("websocketPort", 8081);
         return webUI;
+    }
+
+    private void saveModuleState(String moduleName, boolean enabled) {
+        try {
+            com.google.gson.JsonObject root;
+            if (Files.exists(CONFIG_FILE)) {
+                root = GSON.fromJson(Files.readString(CONFIG_FILE), com.google.gson.JsonObject.class);
+            } else {
+                root = new com.google.gson.JsonObject();
+            }
+            if (!root.has("modules")) root.add("modules", new com.google.gson.JsonObject());
+            root.getAsJsonObject("modules").addProperty(moduleName, enabled);
+            Files.writeString(CONFIG_FILE, GSON.toJson(root));
+        } catch (Exception e) {
+            LOG.error("Failed to save module state: {}", moduleName, e);
+        }
+    }
+
+    private void loadModuleStates() {
+        try {
+            if (!Files.exists(CONFIG_FILE)) return;
+            com.google.gson.JsonObject root = GSON.fromJson(Files.readString(CONFIG_FILE), com.google.gson.JsonObject.class);
+            if (root == null || !root.has("modules")) return;
+            com.google.gson.JsonObject modules = root.getAsJsonObject("modules");
+            for (Module module : MODULE.getModules().toArray(new Module[0])) {
+                String name = module.getClass().getSimpleName();
+                if (modules.has(name)) {
+                    boolean enabled = modules.get(name).getAsBoolean();
+                    module.setEnabled(enabled);
+                    LOG.info("Module {} set to {}", name, enabled ? "enabled" : "disabled");
+                }
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to load module states", e);
+        }
     }
 
     public void start() {
@@ -128,12 +230,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             httpServer.createContext("/api/queue", new QueueHandler());
             httpServer.createContext("/api/logs", new LogsFileHandler());
             httpServer.createContext("/api/logs/live", new LogPollHandler());
+            httpServer.createContext("/api/logs/stream", new LogStreamHandler());
             httpServer.createContext("/api/system", new SystemHandler());
             httpServer.createContext("/api/latency", new LatencyHandler());
+            httpServer.createContext("/api/whitelist", new WhitelistHandler());
             httpServer.createContext("/", new StaticFileHandler());
-
-            webSocketServer = new WebSocketServer(wsPort);
-            webSocketServer.start();
 
             httpServer.start();
 
@@ -166,6 +267,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 broadcastLog("INFO", "Queue", "队列位置: " + e.position() + " / Queue position: " + e.position()));
             EVENT_BUS.subscribe(this, QueueCompleteEvent.class, e ->
                 broadcastLog("INFO", "Queue", "队列完成，已进入服务器 / Queue complete, entering server"));
+
+            loadModuleStates();
         } catch (Exception e) {
             LOG.error("Failed to start WebUI", e);
         }
@@ -181,12 +284,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             logHandler = null;
         }
         if (httpServer != null) httpServer.stop(0);
-        if (webSocketServer != null) webSocketServer.stop();
         instance = null;
     }
 
     public void broadcastLog(String level, String logger, String message) {
-        // Store in buffer for HTTP polling
+        message = translateLogMessage(message);
         synchronized (logBuffer) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("level", level);
@@ -197,8 +299,27 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             logBuffer.addLast(entry);
             while (logBuffer.size() > LOG_BUFFER_MAX) logBuffer.removeFirst();
         }
-        // Also send via WebSocket if available
-        if (webSocketServer != null) webSocketServer.broadcastLog(level, logger, message);
+        notifySSEClients(level, logger, message);
+    }
+
+    private void notifySSEClients(String level, String logger, String message) {
+        com.google.gson.JsonObject log = new com.google.gson.JsonObject();
+        log.addProperty("level", level);
+        log.addProperty("logger", logger);
+        log.addProperty("message", message);
+        log.addProperty("timestamp", System.currentTimeMillis());
+        String json = GSON.toJson(log);
+        sseClients.removeIf(exchange -> {
+            try {
+                OutputStream os = exchange.getResponseBody();
+                os.write(("data: " + json + "\n\n").getBytes());
+                os.flush();
+                return false;
+            } catch (IOException e) {
+                try { exchange.close(); } catch (Exception ignored) {}
+                return true;
+            }
+        });
     }
 
     // API Handlers
@@ -214,7 +335,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             status.put("username", CONFIG.authentication.username);
             status.put("proxyAddress", CONFIG.server.getProxyAddress());
             status.put("uptime", System.currentTimeMillis() - Proxy.getInstance().getStartTime());
-            status.put("websocketPort", wsPort);
             sendJson(exchange, status);
         }
     }
@@ -245,7 +365,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                         root.add(entry.getKey(), entry.getValue());
                     }
                     Files.writeString(CONFIG_FILE, GSON.toJson(root));
-                    sendJson(exchange, Map.of("success", true));
+                    sendJson(exchange, Map.of("success", true, "restartRequired", true));
                 } catch (Exception e) {
                     sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
                 }
@@ -281,6 +401,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                         }
                     }
                     if (found) {
+                        saveModuleState(name, enabled);
                         sendJson(exchange, Map.of("success", true));
                     } else {
                         sendJson(exchange, Map.of("success", false, "error", "Module not found: " + name));
@@ -356,6 +477,65 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 players.add(Map.of("name", session.getName(), "uuid", session.getUUID().toString(), "type", "spectator"))
             );
             sendJson(exchange, players);
+        }
+    }
+
+    private static class WhitelistHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            String method = exchange.getRequestMethod();
+            if ("GET".equals(method)) {
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("enabled", CONFIG.server.extra.whitelist.enable);
+                data.put("kickmsg", CONFIG.server.extra.whitelist.kickmsg);
+                data.put("autoAddClient", CONFIG.server.extra.whitelist.autoAddClient);
+                List<Map<String, Object>> entries = new ArrayList<>();
+                for (var entry : CONFIG.server.extra.whitelist.whitelist) {
+                    Map<String, Object> e = new LinkedHashMap<>();
+                    e.put("username", entry.username());
+                    e.put("uuid", entry.uuid().toString());
+                    entries.add(e);
+                }
+                data.put("whitelist", entries);
+                sendJson(exchange, data);
+            } else if ("POST".equals(method)) {
+                try {
+                    String body = new String(exchange.getRequestBody().readAllBytes());
+                    com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
+                    String action = json.get("action").getAsString();
+                    switch (action) {
+                        case "toggle" -> {
+                            CONFIG.server.extra.whitelist.enable = json.get("enabled").getAsBoolean();
+                            sendJson(exchange, Map.of("success", true, "enabled", CONFIG.server.extra.whitelist.enable));
+                        }
+                        case "add" -> {
+                            String username = json.get("username").getAsString();
+                            var result = PLAYER_LISTS.getWhitelist().add(username);
+                            if (result.isPresent()) {
+                                sendJson(exchange, Map.of("success", true, "username", result.get().username(), "uuid", result.get().uuid().toString()));
+                            } else {
+                                sendJson(exchange, Map.of("success", false, "error", "无法解析用户名 / Could not resolve username"));
+                            }
+                        }
+                        case "remove" -> {
+                            String username = json.get("username").getAsString();
+                            PLAYER_LISTS.getWhitelist().remove(username);
+                            sendJson(exchange, Map.of("success", true));
+                        }
+                        case "updateConfig" -> {
+                            if (json.has("kickmsg")) CONFIG.server.extra.whitelist.kickmsg = json.get("kickmsg").getAsString();
+                            if (json.has("autoAddClient")) CONFIG.server.extra.whitelist.autoAddClient = json.get("autoAddClient").getAsBoolean();
+                            sendJson(exchange, Map.of("success", true));
+                        }
+                        default -> sendJson(exchange, Map.of("success", false, "error", "Unknown action: " + action));
+                    }
+                } catch (Exception e) {
+                    sendJson(exchange, Map.of("success", false, "error", e.getMessage()));
+                }
+            } else {
+                sendJson(exchange, Map.of("error", "Method not allowed"));
+            }
         }
     }
 
@@ -469,6 +649,19 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 }
             }
             sendJson(exchange, Map.of("logs", result, "counter", logPollCounter));
+        }
+    }
+
+    private static class LogStreamHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+            exchange.getResponseHeaders().set("Connection", "keep-alive");
+            exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+            exchange.sendResponseHeaders(200, 0);
+            sseClients.add(exchange);
         }
     }
 
@@ -620,7 +813,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 .then(literal("disable").executes(ctx -> { stop(); ctx.getSource().getEmbed().title("WebUI Disabled"); return 1; }))
                 .then(literal("status").executes(ctx -> {
                     String status = (httpServer != null && httpServer.getAddress() != null) ? "Running" : "Stopped";
-                    ctx.getSource().getEmbed().title("WebUI Status").description("状态: " + status + "\nHTTP: http://localhost:" + httpPort + "\nWebSocket: ws://localhost:" + wsPort);
+                    ctx.getSource().getEmbed().title("WebUI Status").description("状态: " + status + "\nHTTP: http://localhost:" + httpPort);
                     return 1;
                 }))
                 .executes(ctx -> { ctx.getSource().getEmbed().title("WebUI").description("用法: webui enable/disable/status"); return 1; });

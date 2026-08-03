@@ -329,6 +329,15 @@ body {
     font-size: 0.92rem;
     margin-bottom: 2px;
     font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.module-cn {
+    font-size: 0.72rem;
+    color: var(--ctp-overlay0);
+    font-weight: 400;
 }
 
 .module-info p {
@@ -670,6 +679,7 @@ body {
     background-color: var(--ctp-surface0);
     border: 1px solid var(--ctp-surface1);
     overflow-x: auto;
+    margin-bottom: 20px;
 }
 
 .players-table {
@@ -1007,4 +1017,136 @@ body {
     padding-left: 16px;
     border-left: 2px solid var(--ctp-sapphire);
     margin-left: 4px;
+}
+
+/* ── Whitelist ──────────────────────────────── */
+.whitelist-section {
+    background-color: var(--ctp-surface0);
+    border: 1px solid var(--ctp-surface1);
+    padding: 20px;
+}
+
+.whitelist-header {
+    margin-bottom: 16px;
+}
+
+.whitelist-header h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.whitelist-header h3 .en {
+    font-size: 0.68rem;
+    color: var(--ctp-overlay0);
+    font-weight: 400;
+}
+
+.whitelist-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.whitelist-toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background-color: var(--ctp-mantle);
+    border: 1px solid var(--ctp-surface1);
+}
+
+.toggle-label {
+    font-size: 0.88rem;
+    color: var(--ctp-text);
+    font-weight: 500;
+}
+
+.toggle-label .en {
+    font-size: 0.68rem;
+    color: var(--ctp-overlay0);
+    font-weight: 400;
+}
+
+.whitelist-kickmsg-row {
+    display: flex;
+    gap: 8px;
+}
+
+.whitelist-kickmsg-row input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 4px;
+    background-color: var(--ctp-mantle);
+    color: var(--ctp-text);
+    font-size: 0.88rem;
+    font-family: inherit;
+}
+
+.whitelist-kickmsg-row input:focus {
+    outline: none;
+    border-color: var(--ctp-mauve);
+}
+
+.whitelist-add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.whitelist-add-row input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 4px;
+    background-color: var(--ctp-mantle);
+    color: var(--ctp-text);
+    font-size: 0.88rem;
+    font-family: inherit;
+}
+
+.whitelist-add-row input:focus {
+    outline: none;
+    border-color: var(--ctp-mauve);
+}
+
+.whitelist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.whitelist-entry {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    background-color: var(--ctp-mantle);
+    border: 1px solid var(--ctp-surface1);
+    gap: 12px;
+}
+
+.whitelist-entry-name {
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.whitelist-entry-uuid {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--ctp-overlay1);
+    flex: 1;
+}
+
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 0.78rem;
+}
+
+.whitelist-empty {
+    text-align: center;
+    padding: 24px;
+    color: var(--ctp-overlay1);
+    font-size: 0.88rem;
 }
