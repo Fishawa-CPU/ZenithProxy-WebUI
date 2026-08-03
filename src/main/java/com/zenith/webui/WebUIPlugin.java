@@ -202,6 +202,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             httpServer.createContext("/api/logs/stream", new LogStreamHandler());
             httpServer.createContext("/api/system", new SystemHandler());
             httpServer.createContext("/api/latency", new LatencyHandler());
+            httpServer.createContext("/api/player", new PlayerHandler());
             httpServer.createContext("/api/whitelist", new WhitelistHandler());
             httpServer.createContext("/", new StaticFileHandler());
 
@@ -587,6 +588,43 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 data.put("connected", false);
                 data.put("botLatency", -1);
                 data.put("players", new ArrayList<>());
+            }
+            sendJson(exchange, data);
+        }
+    }
+
+    private static class PlayerHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equals(exchange.getRequestMethod())) { sendJson(exchange, Map.of()); return; }
+            Map<String, Object> data = new LinkedHashMap<>();
+            try {
+                var client = Proxy.getInstance().getClient();
+                boolean connected = client != null && client.isConnected();
+                data.put("connected", connected);
+
+                if (connected) {
+                    var playerCache = CACHE.getPlayerCache();
+                    var thePlayer = playerCache.getThePlayer();
+                    if (thePlayer != null) {
+                        data.put("health", thePlayer.getHealth());
+                        data.put("food", thePlayer.getFood());
+                        data.put("saturation", thePlayer.getSaturation());
+                    } else {
+                        data.put("health", null);
+                        data.put("food", null);
+                        data.put("saturation", null);
+                    }
+                } else {
+                    data.put("health", null);
+                    data.put("food", null);
+                    data.put("saturation", null);
+                }
+            } catch (Exception e) {
+                data.put("connected", false);
+                data.put("health", null);
+                data.put("food", null);
+                data.put("saturation", null);
             }
             sendJson(exchange, data);
         }

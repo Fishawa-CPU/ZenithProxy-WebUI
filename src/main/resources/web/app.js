@@ -131,23 +131,33 @@ function showTitle(text) {
         titleCard = document.getElementById('titleCard');
         titleText = document.getElementById('titleText');
     }
-    if (text && text.trim()) {
-        titleCard.style.display = '';
-        titleText.textContent = text;
-    } else {
-        titleCard.style.display = 'none';
-    }
+    titleText.textContent = (text && text.trim()) ? text : '-';
 }
 
 // ── Dashboard ─────────────────────────────────
 async function loadDashboard() {
-    const [s, p] = await Promise.all([apiCall('/status'), apiCall('/players')]);
+    const [s, p, pl] = await Promise.all([apiCall('/status'), apiCall('/players'), apiCall('/player')]);
     if (!s) return;
     document.getElementById('proxyStatus').textContent = s.connected ? '已连接' : '未连接';
     document.getElementById('proxyStatus').style.color = s.connected ? 'var(--success-color)' : 'var(--error-color)';
     document.getElementById('currentUsername').textContent = s.username || '-';
     document.getElementById('proxyAddress').textContent = s.proxyAddress || '-';
     document.getElementById('mcVersion').textContent = s.version || '-';
+
+    // Player health/food display
+    const healthEl = document.getElementById('playerHealth');
+    const foodEl = document.getElementById('playerFood');
+    if (pl && pl.connected && pl.health !== null) {
+        healthEl.textContent = `${pl.health} / 20`;
+        healthEl.style.color = pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)';
+        foodEl.textContent = `${pl.food} / 20`;
+        foodEl.style.color = pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)';
+    } else {
+        healthEl.textContent = '-';
+        healthEl.style.color = 'var(--ctp-overlay1)';
+        foodEl.textContent = '-';
+        foodEl.style.color = 'var(--ctp-overlay1)';
+    }
     if (s.uptime) {
         const h = Math.floor(s.uptime / 3600000), m = Math.floor((s.uptime % 3600000) / 60000), sec = Math.floor((s.uptime % 60000) / 1000);
         document.getElementById('uptime').textContent = `${h}时 ${m}分 ${sec}秒`;
