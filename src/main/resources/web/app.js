@@ -162,7 +162,7 @@ async function loadDashboard() {
     // Player health/food display
     const statsEl = document.getElementById('playerStats');
     if (pl && pl.connected && pl.health !== null) {
-        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">HP ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">饱 ${pl.food}/20</span>`;
+        statsEl.innerHTML = `<span style="color:${pl.health > 10 ? 'var(--success-color)' : pl.health > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">hp ${pl.health}/20</span> &nbsp; <span style="color:${pl.food > 10 ? 'var(--success-color)' : pl.food > 5 ? 'var(--warning-color)' : 'var(--error-color)'}">hu ${pl.food}/20</span>`;
     } else {
         statsEl.textContent = '-';
         statsEl.style.color = 'var(--ctp-overlay1)';
