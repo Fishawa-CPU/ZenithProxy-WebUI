@@ -39,6 +39,11 @@ import com.zenith.event.client.ClientDisconnectEvent;
 import com.zenith.event.queue.QueueStartEvent;
 import com.zenith.event.queue.QueuePositionUpdateEvent;
 import com.zenith.event.queue.QueueCompleteEvent;
+import com.zenith.network.client.ClientSession;
+import com.zenith.network.codec.PacketCodecRegistries;
+import com.zenith.network.codec.PacketHandlerCodec;
+import com.zenith.network.codec.PacketHandlerStateCodec;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
 
 import static com.zenith.Globals.*;
 import static com.mojang.brigadier.arguments.IntegerArgumentType.getInteger;
@@ -202,6 +207,21 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
             httpServer.start();
 
+            // Register Title packet handler
+            try {
+                var titleCodec = PacketHandlerCodec.clientBuilder()
+                    .setId("webui-title-handler")
+                    .setPriority(100)
+                    .allStates(PacketHandlerStateCodec.<ClientSession>clientBuilder()
+                        .inbound(ClientboundSetTitleTextPacket.class, new TitlePacketHandler())
+                        .build())
+                    .build();
+                PacketCodecRegistries.CLIENT_REGISTRY.register(titleCodec);
+                LOG.info("Title packet handler registered");
+            } catch (Exception e) {
+                LOG.warn("Failed to register Title packet handler", e);
+            }
+
             // Register Logback appender to capture all SLF4J logs
             logHandler = new WebUILogHandler();
             LoggerContext context = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
@@ -271,6 +291,24 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         log.addProperty("message", message);
         log.addProperty("timestamp", System.currentTimeMillis());
         String json = GSON.toJson(log);
+        sseClients.removeIf(exchange -> {
+            try {
+                OutputStream os = exchange.getResponseBody();
+                os.write(("data: " + json + "\n\n").getBytes());
+                os.flush();
+                return false;
+            } catch (IOException e) {
+                try { exchange.close(); } catch (Exception ignored) {}
+                return true;
+            }
+        });
+    }
+
+    public static void pushTitle(String text) {
+        com.google.gson.JsonObject data = new com.google.gson.JsonObject();
+        data.addProperty("type", "title");
+        data.addProperty("text", text);
+        String json = GSON.toJson(data);
         sseClients.removeIf(exchange -> {
             try {
                 OutputStream os = exchange.getResponseBody();

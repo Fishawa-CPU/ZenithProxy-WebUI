@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
     initTerminal();
     initConfigTabs();
+    initSSE();
 
     // Whitelist add input Enter key
     const wlInput = document.getElementById('whitelistAddInput');
@@ -73,7 +74,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     loadDashboard();
     loadCommands();
-    startLogPolling();
 });
 
 // ── Navigation ────────────────────────────────
@@ -105,6 +105,38 @@ async function apiCall(endpoint, method = 'GET', body = null) {
         const r = await fetch(API_BASE + endpoint, opts);
         return await r.json();
     } catch (e) { return null; }
+}
+
+// ── SSE ───────────────────────────────────────
+let titleCard = null;
+let titleText = null;
+
+function initSSE() {
+    const es = new EventSource(API_BASE + '/logs/stream');
+    es.onmessage = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'title') {
+                showTitle(data.text);
+            } else {
+                addLogEntry(data);
+            }
+        } catch (err) {}
+    };
+    es.onerror = () => { es.close(); setTimeout(initSSE, 3000); };
+}
+
+function showTitle(text) {
+    if (!titleCard) {
+        titleCard = document.getElementById('titleCard');
+        titleText = document.getElementById('titleText');
+    }
+    if (text && text.trim()) {
+        titleCard.style.display = '';
+        titleText.textContent = text;
+    } else {
+        titleCard.style.display = 'none';
+    }
 }
 
 // ── Dashboard ─────────────────────────────────
