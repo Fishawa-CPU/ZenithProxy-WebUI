@@ -62,7 +62,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
     initTerminal();
     initConfigTabs();
-    initSSE();
 
     // Whitelist add input Enter key
     const wlInput = document.getElementById('whitelistAddInput');
@@ -74,6 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     loadDashboard();
     loadCommands();
+    startLogPolling();
 });
 
 // ── Navigation ────────────────────────────────
@@ -107,39 +107,36 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     } catch (e) { return null; }
 }
 
-// ── SSE ───────────────────────────────────────
-let titleCard = null;
-let titleText = null;
-let sseConnection = null;
-
-function initSSE() {
-    if (sseConnection) {
-        sseConnection.close();
-    }
-    sseConnection = new EventSource(API_BASE + '/logs/stream');
-    sseConnection.onmessage = (e) => {
-        try {
-            const data = JSON.parse(e.data);
-            if (data.type === 'title') {
-                showTitle(data.text);
-            } else if (data.level && data.message) {
-                addLogEntry(data);
-            }
-        } catch (err) {}
-    };
-    sseConnection.onerror = () => {
-        sseConnection.close();
-        sseConnection = null;
-        setTimeout(initSSE, 3000);
-    };
+// ── Log Polling (HTTP) ────────────────────────
+function startLogPolling() {
+    if (logPollTimer) return;
+    fetchLogs(); // fetch immediately
+    logPollTimer = setInterval(fetchLogs, LOG_POLL_INTERVAL);
 }
 
-function showTitle(text) {
-    if (!titleCard) {
-        titleCard = document.getElementById('titleCard');
-        titleText = document.getElementById('titleText');
+function stopLogPolling() {
+    if (logPollTimer) {
+        clearInterval(logPollTimer);
+        logPollTimer = null;
     }
-    titleText.textContent = (text && text.trim()) ? text.trim() : '-';
+}
+
+async function fetchLogs() {
+    try {
+        const url = API_BASE + '/logs/live' + (lastLogId >= 0 ? `?after=${lastLogId}` : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        if (data && data.logs && Array.isArray(data.logs)) {
+            for (const log of data.logs) {
+                addLogEntry(log);
+            }
+            if (data.logs.length > 0) {
+                lastLogId = data.counter - 1;
+            }
+        }
+    } catch (e) {
+        // polling failed, will retry next interval
+    }
 }
 
 // ── Dashboard ─────────────────────────────────
@@ -420,7 +417,6 @@ function hideAutocomplete() { autocompleteIndex = -1; const d = document.getElem
 
 // ── Terminal output ───────────────────────────
 function addLogEntry(log) {
-    if (!log || !log.level || !log.message) return;
     logs.push(log);
     terminalLogCount++;
     updateTerminalCounts();
@@ -428,11 +424,8 @@ function addLogEntry(log) {
     if (!output) return;
     const entry = document.createElement('div');
     entry.className = 'terminal-line terminal-line-log';
-    const ts = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
-    const level = (log.level || 'INFO').toLowerCase();
-    const logger = log.logger || '';
-    const message = log.message || '';
-    entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${level}">${log.level}</span><span class="log-msg">[${logger}] ${message}</span>`;
+    const ts = new Date(log.timestamp).toLocaleTimeString();
+    entry.innerHTML = `<span class="log-ts">${ts}</span><span class="log-lv ${log.level.toLowerCase()}">${log.level}</span><span class="log-msg">[${log.logger}] ${log.message}</span>`;
     output.appendChild(entry);
     if (terminalScrollLocked) output.scrollTop = output.scrollHeight;
     while (output.children.length > MAX_TERMINAL_LINES) output.removeChild(output.firstChild);
