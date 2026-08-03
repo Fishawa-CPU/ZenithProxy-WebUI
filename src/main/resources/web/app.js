@@ -11,9 +11,7 @@
         }
         // Show user info
         const userInfo = document.getElementById('userInfo');
-        const currentUser = document.getElementById('currentUser');
-        if (userInfo && currentUser) {
-            currentUser.textContent = data.username;
+        if (userInfo) {
             userInfo.style.display = 'block';
         }
     } catch (e) {

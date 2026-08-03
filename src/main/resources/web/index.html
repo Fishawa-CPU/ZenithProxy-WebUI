@@ -33,9 +33,17 @@
                 </li>
             </ul>
             <div class="nav-footer">
-                <div class="user-info" id="userInfo" style="display:none; margin-top:12px; padding:8px; background:var(--ctp-surface0); border-radius:8px; font-size:12px;">
-                    <div style="color:var(--ctp-subtext0);">登录用户: <span id="currentUser" style="color:var(--ctp-text);"></span></div>
-                    <button onclick="logout()" style="margin-top:8px; padding:4px 12px; background:var(--ctp-red); color:var(--ctp-crust); border:none; border-radius:4px; cursor:pointer; font-size:12px;">登出</button>
+                <div class="user-info" id="userInfo" style="display:none; margin-top:12px;">
+                    <button class="logout-tile" onclick="logout()">
+                        <div class="logout-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                                <polyline points="16 17 21 12 16 7"/>
+                                <line x1="21" y1="12" x2="9" y2="12"/>
+                            </svg>
+                        </div>
+                        <span class="logout-label">登出<span class="en">Logout</span></span>
+                    </button>
                 </div>
             </div>
         </nav>

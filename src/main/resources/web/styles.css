@@ -150,6 +150,60 @@ body {
     border-top: 1px solid var(--border-color);
 }
 
+.logout-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 12px 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+    background-color: var(--ctp-surface0);
+    color: var(--ctp-red);
+}
+
+.logout-tile:hover {
+    background-color: var(--ctp-red);
+    color: var(--ctp-crust);
+}
+
+.logout-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background-color: rgba(237, 135, 150, 0.15);
+    border-radius: 6px;
+    transition: all 0.15s ease;
+}
+
+.logout-tile:hover .logout-icon {
+    background-color: rgba(17, 17, 27, 0.2);
+}
+
+.logout-label {
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-align: center;
+}
+
+.logout-label .en {
+    display: block;
+    font-size: 0.65rem;
+    color: var(--ctp-overlay0);
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+.logout-tile:hover .logout-label .en {
+    color: var(--ctp-crust);
+}
+
 /* ── Main Content ───────────────────────────── */
 .main-content {
     flex: 1;
