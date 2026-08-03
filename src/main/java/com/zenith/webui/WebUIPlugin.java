@@ -26,10 +26,10 @@ import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.CharsetUtil;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -339,11 +339,12 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         notifySSEClients(level, logger, message);
     }
 
-    /** Broadcast SSE message to a client list. Shared by all SSE pushers. */
-    private static void broadcastSSE(List<Channel> clients, String json) {
+    /** Broadcast SSE message to a client list. Shared by all SSE pushers.
+     *  @param isLogStream true for log SSE clients, false for dashboard SSE clients */
+    private static void broadcastSSE(List<Channel> clients, String json, boolean isLogStream) {
         String sseData = "data: " + json + "\n\n";
         clients.removeIf(ch -> {
-            if (!ch.isActive()) { sseClientTokens.remove(ch); return true; }
+            if (!ch.isActive()) { if (isLogStream) sseClientTokens.remove(ch); return true; }
             try {
                 ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
                 DefaultHttpContent content = new DefaultHttpContent(buf);
@@ -364,14 +365,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         log.addProperty("logger", logger);
         log.addProperty("message", message);
         log.addProperty("timestamp", System.currentTimeMillis());
-        broadcastSSE(sseClients, GSON.toJson(log));
+        broadcastSSE(sseClients, GSON.toJson(log), true);
     }
 
     public static void pushTitle(String text) {
         com.google.gson.JsonObject data = new com.google.gson.JsonObject();
         data.addProperty("type", "title");
         data.addProperty("text", text);
-        broadcastSSE(sseClients, GSON.toJson(data));
+        broadcastSSE(sseClients, GSON.toJson(data), true);
     }
 
     // Netty Channel Handler
@@ -722,7 +723,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 // Validate SSE tokens periodically
                 validateSSETokens();
                 if (dashboardSseClients.isEmpty()) return;
-                broadcastSSE(dashboardSseClients, GSON.toJson(buildDashboardData()));
+                broadcastSSE(dashboardSseClients, GSON.toJson(buildDashboardData()), false);
             } catch (Exception ignored) {}
         }, 0, 1, java.util.concurrent.TimeUnit.SECONDS);
     }
@@ -886,18 +887,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         ctx.write(httpResponse);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-    }
-
-    /** Send JSON directly to a channel (no ctx needed, for async callbacks) */
-    private void sendJsonObject(Channel channel, Object data) {
-        byte[] bytes = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
-        ByteBuf buf = Unpooled.wrappedBuffer(bytes);
-        HttpResponse resp = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-        resp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
-        resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        channel.write(resp);
-        channel.write(new DefaultHttpContent(buf));
-        channel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
     }
 
     private void sendCorsResponse(ChannelHandlerContext ctx) {

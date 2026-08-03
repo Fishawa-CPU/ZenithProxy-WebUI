@@ -6,7 +6,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
-import io.netty.util.CharsetUtil;
+import io.netty.buffer.Unpooled;
 
 import java.nio.charset.StandardCharsets;
 
@@ -94,7 +94,7 @@ public class AuthHandler {
         if (cookieHeader != null) {
             String[] cookies = cookieHeader.split(";");
             for (String cookie : cookies) {
-                String[] parts = cookie.trim().split("=");
+                String[] parts = cookie.trim().split("=", 2);
                 if (parts.length == 2 && "webui_token".equals(parts[0].trim())) {
                     return parts[1].trim();
                 }

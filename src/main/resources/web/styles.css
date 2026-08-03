@@ -819,16 +819,6 @@ body {
         display: none;
     }
 
-    .config-tabs {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    .config-tab {
-        padding: 10px 16px;
-        font-size: 0.82rem;
-    }
-
     .terminal-output {
         height: 400px;
     }
@@ -886,10 +876,6 @@ body {
 
     .nav-item.active {
         background-color: var(--ctp-surface0);
-    }
-
-    .players-table tr:hover {
-        background-color: transparent;
     }
 }
 

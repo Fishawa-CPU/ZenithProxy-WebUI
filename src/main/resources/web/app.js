@@ -104,7 +104,6 @@ let serverCommands = KNOWN_COMMANDS;
 document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
     initTerminal();
-    initConfigTabs();
 
     // Whitelist add input Enter key
     const wlInput = document.getElementById('whitelistAddInput');
@@ -535,6 +534,8 @@ function hideAutocomplete() { autocompleteIndex = -1; const d = document.getElem
 // ── Terminal output ───────────────────────────
 function addLogEntry(log) {
     logs.push(log);
+    // Prevent unbounded memory growth
+    if (logs.length > MAX_TERMINAL_LINES * 2) logs.splice(0, logs.length - MAX_TERMINAL_LINES);
     terminalLogCount++;
     updateTerminalCounts();
     if (currentPage !== 'terminal') return;
