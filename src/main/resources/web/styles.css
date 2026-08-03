@@ -525,7 +525,7 @@ body {
 }
 
 /* ── Terminal ───────────────────────────────── */
-#terminal {
+#terminal.page.active {
     display: flex;
     flex-direction: column;
     height: calc(100vh - 48px);

@@ -65,7 +65,6 @@ let terminalCmdCount = 0;
 let terminalLogCount = 0;
 
 // Server state for queue display
-let currentTargetServer = '';
 let currentConnected = false;
 
 const KNOWN_COMMANDS = [
@@ -222,25 +221,21 @@ async function loadDashboard() {
     document.getElementById('mcVersion').textContent = s.version || '-';
 
     // Save server state for queue display
-    currentTargetServer = s.targetServer || '';
     currentConnected = s.connected || false;
 
-    // Queue display - only show for 3c3u.org server
+    // Queue display
     const titleText = document.getElementById('titleText');
-    const is3c3u = s.targetServer && s.targetServer.toLowerCase().includes('3c3u.org');
-    if (is3c3u && s.connected) {
+    if (s.connected) {
         if (q && q.inQueue && q.position > 0) {
-            // 排队中，显示位置
-            titleText.textContent = `队列位置: ${q.position}`;
+            let text = `队列位置: ${q.position}`;
+            if (q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
+            titleText.textContent = text;
             titleText.style.color = 'var(--ctp-yellow)';
-        } else if (q && !q.inQueue) {
-            // 没有排队，已进入服务器
-            titleText.textContent = '已进入';
-            titleText.style.color = 'var(--ctp-green)';
         } else {
-            // 其他情况
-            titleText.textContent = '-';
-            titleText.style.color = 'var(--ctp-overlay1)';
+            let text = '已进入';
+            if (q && q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
+            titleText.textContent = text;
+            titleText.style.color = 'var(--ctp-green)';
         }
     } else {
         titleText.textContent = '-';
@@ -329,17 +324,17 @@ async function fetchSystemStats() {
     // Update queue display
     const titleText = document.getElementById('titleText');
     if (titleText) {
-        const is3c3u = currentTargetServer && currentTargetServer.toLowerCase().includes('3c3u.org');
-        if (is3c3u && currentConnected) {
+        if (currentConnected) {
             if (q && q.inQueue && q.position > 0) {
-                titleText.textContent = `队列位置: ${q.position}`;
+                let text = `队列位置: ${q.position}`;
+                if (q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
+                titleText.textContent = text;
                 titleText.style.color = 'var(--ctp-yellow)';
-            } else if (q && !q.inQueue) {
-                titleText.textContent = '已进入';
-                titleText.style.color = 'var(--ctp-green)';
             } else {
-                titleText.textContent = '-';
-                titleText.style.color = 'var(--ctp-overlay1)';
+                let text = '已进入';
+                if (q && q.onlinePlayers > 0) text += ` | 在线: ${q.onlinePlayers}`;
+                titleText.textContent = text;
+                titleText.style.color = 'var(--ctp-green)';
             }
         } else {
             titleText.textContent = '-';

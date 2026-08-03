@@ -1,6 +1,7 @@
 package com.zenith.webui;
 
 import com.zenith.webui.config.ConfigManager;
+import com.zenith.webui.queue.QueueParser;
 import com.zenith.webui.auth.AuthManager;
 import com.zenith.webui.auth.AuthHandler;
 import com.zenith.webui.auth.AuthController;
@@ -59,6 +60,7 @@ import com.zenith.network.client.ClientSession;
 import com.zenith.network.codec.PacketCodecRegistries;
 import com.zenith.network.codec.PacketHandlerCodec;
 import com.zenith.network.codec.PacketHandlerStateCodec;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
 
 import static com.zenith.Globals.*;
@@ -214,6 +216,21 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 LOG.warn("Failed to register Title packet handler", e);
             }
 
+            // Register Queue parser (Subtitle packet handler for 3c3u.org)
+            try {
+                var queueCodec = PacketHandlerCodec.clientBuilder()
+                    .setId("webui-queue-parser")
+                    .setPriority(100)
+                    .allStates(PacketHandlerStateCodec.<ClientSession>clientBuilder()
+                        .inbound(ClientboundSetSubtitleTextPacket.class, new QueueParser())
+                        .build())
+                    .build();
+                PacketCodecRegistries.CLIENT_REGISTRY.register(queueCodec);
+                LOG.info("Queue parser registered");
+            } catch (Exception e) {
+                LOG.warn("Failed to register Queue parser", e);
+            }
+
             // Register Logback appender
             logHandler = new WebUILogHandler();
             LoggerContext context = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
@@ -249,8 +266,10 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 broadcastLog("INFO", "Client", "正在连接服务器... / Connecting to server..."));
             EVENT_BUS.subscribe(this, ClientOnlineEvent.class, e ->
                 broadcastLog("INFO", "Client", "已上线 / Now online"));
-            EVENT_BUS.subscribe(this, ClientDisconnectEvent.class, e ->
-                broadcastLog("WARN", "Client", "已断开: " + e.reason() + " / Disconnected: " + e.reason()));
+            EVENT_BUS.subscribe(this, ClientDisconnectEvent.class, e -> {
+                QueueParser.reset();
+                broadcastLog("WARN", "Client", "已断开: " + e.reason() + " / Disconnected: " + e.reason());
+            });
             EVENT_BUS.subscribe(this, QueueStartEvent.class, e ->
                 broadcastLog("INFO", "Queue", "已进入队列 / Entered queue"));
             EVENT_BUS.subscribe(this, QueuePositionUpdateEvent.class, e ->
@@ -427,8 +446,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private void handleStatus(ChannelHandlerContext ctx) {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("connected", Proxy.getInstance().isConnected());
-        status.put("inQueue", Proxy.getInstance().isInQueue());
-        status.put("queuePosition", Proxy.getInstance().getQueuePosition());
+        QueueData qd = getQueueData();
+        status.put("inQueue", qd.inQueue);
+        status.put("queuePosition", qd.position);
         status.put("version", MC_VERSION);
         status.put("username", CONFIG.authentication.username);
         status.put("proxyAddress", CONFIG.server.getProxyAddress());
@@ -536,9 +556,47 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
     private void handleQueue(ChannelHandlerContext ctx) {
         Map<String, Object> queue = new LinkedHashMap<>();
-        queue.put("inQueue", Proxy.getInstance().isInQueue());
-        queue.put("position", Proxy.getInstance().getQueuePosition());
+        QueueData qd = getQueueData();
+        queue.put("inQueue", qd.inQueue);
+        queue.put("position", qd.position);
+        queue.put("onlinePlayers", qd.onlinePlayers);
+        queue.put("queuePos", qd.queuePos);
         sendJson(ctx, queue);
+    }
+
+    // Queue data holders
+    private record QueueData(boolean inQueue, int position, int onlinePlayers, String queuePos) {}
+
+    private QueueData getQueueData() {
+        String server = CONFIG.client.server.address;
+        if (server == null) {
+            return new QueueData(false, 0, 0, "");
+        }
+
+        String serverLower = server.toLowerCase();
+
+        // 3c3u.org: use QueueParser (Subtitle packet parsing)
+        if (serverLower.contains("3c3u.org")) {
+            return new QueueData(
+                QueueParser.is3cQueue(),
+                QueueParser.positionInQueue > 0 ? QueueParser.positionInQueue : 0,
+                QueueParser.onlinePlayers,
+                QueueParser.queuePos
+            );
+        }
+
+        // 2b2t.org: use ZenithProxy built-in queue
+        if (serverLower.contains("2b2t.org")) {
+            return new QueueData(
+                Proxy.getInstance().isInQueue(),
+                Proxy.getInstance().getQueuePosition(),
+                0,
+                ""
+            );
+        }
+
+        // Other servers: no queue detection yet, leave empty for future expansion
+        return new QueueData(false, 0, 0, "");
     }
 
     private void handleLogsFile(ChannelHandlerContext ctx, String query) {
