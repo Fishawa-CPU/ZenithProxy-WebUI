@@ -874,14 +874,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             data.put("queueOnlinePlayers", qd.onlinePlayers);
             data.put("queuePos", qd.queuePos);
             data.put("version", MC_VERSION);
-            // viaVersion: enabled + protocol version if auto is off
+            // viaVersion: actual protocol version from connected client session
             String viaVersionStr = "";
             try {
-                if (CONFIG.client.viaversion != null && CONFIG.client.viaversion.enabled) {
-                    if (!CONFIG.client.viaversion.autoProtocolVersion) {
-                        viaVersionStr = "via " + CONFIG.client.viaversion.protocolVersion;
-                    } else {
-                        viaVersionStr = "via auto";
+                var client = Proxy.getInstance().getClient();
+                if (client != null && client.isConnected()) {
+                    var protoVer = client.getProtocolVersion();
+                    if (protoVer != null) {
+                        viaVersionStr = "via " + protoVer.getName();
                     }
                 }
             } catch (Exception ignored) {}
