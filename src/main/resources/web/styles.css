@@ -437,53 +437,6 @@ body {
 }
 
 /* ── Config ─────────────────────────────────── */
-.config-container {
-    background-color: var(--ctp-surface0);
-    overflow: hidden;
-}
-
-.config-tabs {
-    display: flex;
-    background-color: var(--ctp-mantle);
-    border-bottom: 1px solid var(--ctp-surface1);
-    overflow-x: auto;
-}
-
-.config-tab {
-    padding: 12px 20px;
-    border: none;
-    background: none;
-    color: var(--ctp-overlay1);
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 500;
-    white-space: nowrap;
-    transition: color 0.15s ease;
-    font-family: inherit;
-    border-bottom: 2px solid transparent;
-}
-
-.config-tab:hover {
-    color: var(--ctp-text);
-}
-
-.config-tab.active {
-    color: var(--ctp-mauve);
-    border-bottom-color: var(--ctp-mauve);
-}
-
-.config-content {
-    padding: 20px;
-}
-
-.config-section {
-    display: none;
-}
-
-.config-section.active {
-    display: block;
-}
-
 .form-group {
     margin-bottom: 16px;
 }

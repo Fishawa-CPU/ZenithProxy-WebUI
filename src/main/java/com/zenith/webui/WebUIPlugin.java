@@ -427,7 +427,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                     if (token != null) sseClientTokens.put(ctx.channel(), token);
                 }
                 switch (path) {
-                    case "/api/config" -> handleConfig(ctx, req);
                     case "/api/commands" -> handleCommands(ctx, req);
                     case "/api/logs" -> handleLogsFile(ctx, query);
                     case "/api/logs/stream" -> handleLogStream(ctx);
@@ -475,72 +474,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     }
 
     // API Handlers
-    private void handleConfig(ChannelHandlerContext ctx, FullHttpRequest req) {
-        if (HttpMethod.GET.equals(req.method())) {
-            // Return config without sensitive fields
-            com.google.gson.JsonObject configJson = GSON.toJsonTree(CONFIG).getAsJsonObject();
-            if (configJson.has("authentication")) {
-                com.google.gson.JsonObject auth = configJson.getAsJsonObject("authentication");
-                auth.remove("password");
-                auth.addProperty("password", "");
-            }
-            sendJson(ctx, configJson);
-        } else if (HttpMethod.POST.equals(req.method())) {
-            String body = req.content().toString(CharsetUtil.UTF_8);
-            com.google.gson.JsonObject incoming = GSON.fromJson(body, com.google.gson.JsonObject.class);
-            if (incoming == null) {
-                sendJson(ctx, Map.of("success", false, "error", "Invalid JSON"));
-                return;
-            }
-            // Offload file I/O from EventLoop
-            Channel channel = ctx.channel();
-            blockingExecutor.submit(() -> {
-                try {
-                    Path configPath = CONFIG_FILE.toPath();
-                    com.google.gson.JsonObject root;
-                    if (Files.exists(configPath)) {
-                        root = GSON.fromJson(Files.readString(configPath), com.google.gson.JsonObject.class);
-                    } else {
-                        root = new com.google.gson.JsonObject();
-                    }
-                    // Deep merge: only update fields the frontend sent, preserve unknown fields
-                    deepMerge(root, incoming);
-
-                    Files.writeString(configPath, GSON.toJson(root));
-
-                    // Invalidate all tokens if password was changed
-                    if (incoming.has("authentication")) {
-                        com.google.gson.JsonObject auth = incoming.getAsJsonObject("authentication");
-                        if (auth.has("password")) {
-                            authManager.invalidateAllTokensForUser(CONFIG.authentication.username);
-                        }
-                    }
-                    if (channel.isActive()) {
-                        channel.eventLoop().execute(() -> sendJsonObject(channel, Map.of("success", true, "restartRequired", true)));
-                    }
-                } catch (Exception e) {
-                    if (channel.isActive()) {
-                        channel.eventLoop().execute(() -> sendJsonObject(channel, Map.of("success", false, "error", e.getMessage())));
-                    }
-                }
-            });
-        }
-    }
-
-    /** Deep merge source into target, preserving target fields not in source */
-    private void deepMerge(com.google.gson.JsonObject target, com.google.gson.JsonObject source) {
-        for (var entry : source.entrySet()) {
-            String key = entry.getKey();
-            if (!target.has(key)) {
-                target.add(key, entry.getValue());
-            } else if (entry.getValue().isJsonObject() && target.get(key).isJsonObject()) {
-                deepMerge(target.getAsJsonObject(key), entry.getValue().getAsJsonObject());
-            } else {
-                target.add(key, entry.getValue());
-            }
-        }
-    }
-
     private void handleCommands(ChannelHandlerContext ctx, FullHttpRequest req) {
         if (HttpMethod.GET.equals(req.method())) {
             List<String> commands = new ArrayList<>();

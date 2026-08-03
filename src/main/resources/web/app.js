@@ -136,7 +136,7 @@ function navigateTo(page) {
 
     switch (page) {
         case 'dashboard': loadDashboard(); initCharts(); startSystemPolling(); break;
-        case 'config': loadConfig(); break;
+
         case 'terminal': refreshTerminalLogs(); break;
         case 'players': loadWhitelist(); break;
     }
@@ -429,34 +429,6 @@ function processDashboardData(d) {
             detail.innerHTML = parts.join('');
         }
     }
-}
-
-// ── Config ────────────────────────────────────
-async function loadConfig() { const c = await apiCall('/config'); if (c) renderConfigSections(c); }
-function renderConfigSections(c) {
-    document.getElementById('configContent').innerHTML = `
-        <div class="config-section active" id="authSection"><h3>认证设置 <span class="en">Auth</span></h3>
-            <div class="form-group"><label>账号类型</label><select id="accountType"><option value="DEVICE_CODE" ${c.authentication?.accountType === 'DEVICE_CODE' ? 'selected' : ''}>Device Code</option><option value="MSA" ${c.authentication?.accountType === 'MSA' ? 'selected' : ''}>MSA</option><option value="OFFLINE" ${c.authentication?.accountType === 'OFFLINE' ? 'selected' : ''}>Offline</option><option value="PRISM" ${c.authentication?.accountType === 'PRISM' ? 'selected' : ''}>Prism</option></select></div>
-            <div class="form-group"><label>用户名</label><input type="text" id="username" value="${escapeHtml(c.authentication?.username || '')}"></div>
-            <div class="form-group"><label>密码</label><input type="password" id="password" value="${escapeHtml(c.authentication?.password || '')}"></div>
-            <div class="form-group"><label>邮箱</label><input type="email" id="email" value="${escapeHtml(c.authentication?.email || '')}"></div>
-        </div>
-        <div class="config-section" id="clientSection"><h3>客户端设置 <span class="en">Client</span></h3>
-            <div class="form-group"><label>自动连接</label><label class="toggle"><input type="checkbox" id="autoConnect" ${c.client?.autoConnect ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
-            <div class="form-group"><label>目标服务器</label><input type="text" id="targetServer" value="${escapeHtml(c.client?.server?.address || '')}"></div>
-            <div class="form-group"><label>目标端口</label><input type="number" id="targetPort" value="${c.client?.server?.port || 25565}"></div>
-        </div>
-        <div class="config-section" id="serverSection"><h3>服务器设置 <span class="en">Server</span></h3>
-            <div class="form-group"><label>监听地址</label><input type="text" id="bindAddress" value="${c.server?.bind?.address || '0.0.0.0'}"></div>
-            <div class="form-group"><label>监听端口</label><input type="number" id="bindPort" value="${c.server?.bind?.port || 25565}"></div>
-            <div class="form-group"><label>启用服务器</label><label class="toggle"><input type="checkbox" id="serverEnabled" ${c.server?.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
-        </div>`;
-}
-function initConfigTabs() { document.addEventListener('click', (e) => { if (!e.target.classList.contains('config-tab')) return; document.querySelectorAll('.config-tab').forEach(t => t.classList.remove('active')); e.target.classList.add('active'); document.querySelectorAll('.config-section').forEach(s => s.classList.remove('active')); const m = { authentication: 'authSection', client: 'clientSection', server: 'serverSection' }; document.getElementById(m[e.target.dataset.tab])?.classList.add('active'); }); }
-async function saveConfig() {
-    const cfg = { authentication: { accountType: document.getElementById('accountType')?.value, username: document.getElementById('username')?.value, password: document.getElementById('password')?.value, email: document.getElementById('email')?.value }, client: { autoConnect: document.getElementById('autoConnect')?.checked, server: { address: document.getElementById('targetServer')?.value, port: parseInt(document.getElementById('targetPort')?.value) || 25565 } }, server: { bind: { address: document.getElementById('bindAddress')?.value, port: parseInt(document.getElementById('bindPort')?.value) || 25565 }, enabled: document.getElementById('serverEnabled')?.checked } };
-    const r = await apiCall('/config', 'POST', cfg);
-    showNotification(r?.success ? '配置已保存 / Config saved' : '保存失败 / ' + (r?.error || 'Error'), r?.success ? 'success' : 'error');
 }
 
 // ── Commands from server ──────────────────────
