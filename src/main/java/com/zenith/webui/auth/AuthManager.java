@@ -18,7 +18,7 @@ public class AuthManager {
     private final Map<String, TokenInfo> tokens = new ConcurrentHashMap<>();
     // Rate limit: key = "ip:minute_timestamp"
     private final Map<String, Integer> rateLimitMap = new ConcurrentHashMap<>();
-    private long lastRateLimitCleanup = System.currentTimeMillis();
+    private volatile long lastRateLimitCleanup = System.currentTimeMillis();
 
     public AuthManager(WebUIConfig.AuthConfig config) {
         this.config = config;

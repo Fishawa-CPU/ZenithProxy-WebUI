@@ -59,6 +59,7 @@ import com.zenith.network.client.ClientSession;
 import com.zenith.network.codec.PacketCodecRegistries;
 import com.zenith.network.codec.PacketHandlerCodec;
 import com.zenith.network.codec.PacketHandlerStateCodec;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
 
@@ -78,7 +79,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private AuthHandler authHandler;
     private AuthController authController;
 
-    static WebUIPlugin instance;
+    static volatile WebUIPlugin instance;
 
     private static final int LOG_BUFFER_MAX = 500;
     private static final ConcurrentLinkedDeque<Map<String, Object>> logBuffer = new ConcurrentLinkedDeque<>();
@@ -91,11 +92,13 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private java.util.concurrent.ScheduledExecutorService dashboardStreamExecutor;
     private java.util.concurrent.ExecutorService blockingExecutor;
 
-    // File cache for static files (path -> content)
+    // File cache for static files (path -> content), size-bounded to prevent memory growth
     private static final ConcurrentHashMap<Path, byte[]> fileCache = new ConcurrentHashMap<>();
+    private static final int FILE_CACHE_MAX_SIZE = 128;
 
-    // Log message translations
-    private static final Map<String, String> LOG_TRANSLATIONS = new LinkedHashMap<>();
+    // Log message translations (sorted by key length descending to avoid partial-match issues)
+    private static final LinkedHashMap<String, String> LOG_TRANSLATIONS = new LinkedHashMap<>();
+    private static final List<Map.Entry<String, String>> SORTED_TRANSLATIONS;
     static {
         LOG_TRANSLATIONS.put("Connecting to server", "正在连接服务器");
         LOG_TRANSLATIONS.put("Connected to server", "已连接服务器");
@@ -132,18 +135,24 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         LOG_TRANSLATIONS.put("Module disabled", "模块已禁用");
         LOG_TRANSLATIONS.put("Config saved", "配置已保存");
         LOG_TRANSLATIONS.put("Config loaded", "配置已加载");
-        LOG_TRANSLATIONS.put("Error", "错误");
-        LOG_TRANSLATIONS.put("Warning", "警告");
         LOG_TRANSLATIONS.put("Failed to", "未能");
         LOG_TRANSLATIONS.put("Switching to server", "正在切换服务器");
         LOG_TRANSLATIONS.put("Server switch", "服务器切换");
+        LOG_TRANSLATIONS.put("Error", "错误");
+        LOG_TRANSLATIONS.put("Warning", "警告");
+
+        // Pre-sort by key length descending so longer keys are matched first,
+        // preventing partial-match issues (e.g. "Queue started" before "Queue")
+        SORTED_TRANSLATIONS = new ArrayList<>(LOG_TRANSLATIONS.entrySet());
+        SORTED_TRANSLATIONS.sort((a, b) -> Integer.compare(b.getKey().length(), a.getKey().length()));
     }
 
     private static String translateLogMessage(String message) {
         if (message == null || message.isEmpty()) return message;
-        for (var entry : LOG_TRANSLATIONS.entrySet()) {
-            if (message.contains(entry.getKey())) {
-                message = message.replace(entry.getKey(), entry.getValue());
+        for (var entry : SORTED_TRANSLATIONS) {
+            String key = entry.getKey();
+            if (message.contains(key)) {
+                message = message.replace(key, entry.getValue());
             }
         }
         return message;
@@ -173,11 +182,18 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         authController = new AuthController(authManager);
 
         pluginAPI.registerCommand(new WebUICommand());
-        start();
-        LOG.info("WebUI plugin loaded! Access at http://localhost:{}", configManager.getConfig().port);
+        boolean started = start();
+        LOG.info("WebUI plugin loaded!{}", started ? " Access at http://localhost:" + configManager.getConfig().port : " (server failed to start, check logs)");
     }
 
-    public void start() {
+    public boolean start() {
+        if (serverChannel != null && serverChannel.isActive()) {
+            LOG.info("WebUI server already running, not starting again");
+            return true;
+        }
+        // Sanity: if any Netty resources linger, clean them first
+        if (bossGroup != null) { bossGroup.shutdownGracefully(); bossGroup = null; }
+        if (workerGroup != null) { workerGroup.shutdownGracefully(); workerGroup = null; }
         try {
             bossGroup = new NioEventLoopGroup(1);
             workerGroup = new NioEventLoopGroup();
@@ -227,13 +243,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 LOG.warn("Failed to register Title packet handler", e);
             }
 
-            // Register Queue parser (Subtitle packet handler for 3c3u.org)
+            // Register Queue parser (Subtitle + ClearTitles packet handlers for 3c3u.org)
             try {
                 var queueCodec = PacketHandlerCodec.clientBuilder()
                     .setId("webui-queue-parser")
                     .setPriority(100)
                     .allStates(PacketHandlerStateCodec.<ClientSession>clientBuilder()
                         .inbound(ClientboundSetSubtitleTextPacket.class, new QueueParser())
+                        .inbound(ClientboundClearTitlesPacket.class, new QueueParser.ClearHandler())
                         .build())
                     .build();
                 PacketCodecRegistries.CLIENT_REGISTRY.register(queueCodec);
@@ -275,8 +292,10 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             });
             EVENT_BUS.subscribe(this, ClientConnectEvent.class, e ->
                 broadcastLog("INFO", "Client", "正在连接服务器... / Connecting to server..."));
-            EVENT_BUS.subscribe(this, ClientOnlineEvent.class, e ->
-                broadcastLog("INFO", "Client", "已上线 / Now online"));
+            EVENT_BUS.subscribe(this, ClientOnlineEvent.class, e -> {
+                QueueParser.reset();
+                broadcastLog("INFO", "Client", "已上线 / Now online");
+            });
             EVENT_BUS.subscribe(this, ClientDisconnectEvent.class, e -> {
                 QueueParser.reset();
                 broadcastLog("WARN", "Client", "已断开: " + e.reason() + " / Disconnected: " + e.reason());
@@ -285,11 +304,26 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 broadcastLog("INFO", "Queue", "已进入队列 / Entered queue"));
             EVENT_BUS.subscribe(this, QueuePositionUpdateEvent.class, e ->
                 broadcastLog("INFO", "Queue", "队列位置: " + e.position() + " / Queue position: " + e.position()));
-            EVENT_BUS.subscribe(this, QueueCompleteEvent.class, e ->
-                broadcastLog("INFO", "Queue", "队列完成，已进入服务器 / Queue complete, entering server"));
+            EVENT_BUS.subscribe(this, QueueCompleteEvent.class, e -> {
+                QueueParser.reset();
+                broadcastLog("INFO", "Queue", "队列完成，已进入服务器 / Queue complete, entering server");
+            });
         } catch (Exception e) {
             LOG.error("Failed to start WebUI", e);
+            // Clean up partially-initialized resources on failure
+            if (serverChannel != null) { serverChannel.close(); serverChannel = null; }
+            if (workerGroup != null) { workerGroup.shutdownGracefully(); workerGroup = null; }
+            if (bossGroup != null) { bossGroup.shutdownGracefully(); bossGroup = null; }
+            if (blockingExecutor != null) { blockingExecutor.shutdownNow(); blockingExecutor = null; }
+            if (logHandler != null) {
+                LoggerContext context = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
+                context.getLogger(Logger.ROOT_LOGGER_NAME).detachAppender(logHandler);
+                logHandler.stop();
+                logHandler = null;
+            }
+            return false;
         }
+        return true;
     }
 
     public void stop() {
@@ -350,6 +384,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                 DefaultHttpContent content = new DefaultHttpContent(buf);
                 ch.writeAndFlush(content).addListener(future -> {
                     if (!future.isSuccess()) ch.close();
+                    // buf refCnt is managed by DefaultHttpContent, Netty releases on write
                 });
                 return false;
             } catch (Exception e) {
@@ -473,16 +508,31 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     // API Handlers
     private void handleCommands(ChannelHandlerContext ctx, FullHttpRequest req) {
         if (HttpMethod.GET.equals(req.method())) {
-            List<String> commands = new ArrayList<>();
+            List<LinkedHashMap<String, Object>> commands = new ArrayList<>();
             for (var cmd : COMMAND.getCommands()) {
-                commands.add(cmd.commandUsage().getName());
+                var usage = cmd.commandUsage();
+                LinkedHashMap<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", usage.getName());
+                String desc = usage.getDescription();
+                if (desc != null && !desc.isEmpty()) entry.put("description", desc);
+                var aliases = usage.getAliases();
+                if (aliases != null && !aliases.isEmpty()) entry.put("aliases", aliases);
+                commands.add(entry);
             }
             sendJson(ctx, commands);
         } else if (HttpMethod.POST.equals(req.method())) {
             try {
                 String body = req.content().toString(CharsetUtil.UTF_8);
+                if (body == null || body.isEmpty()) {
+                    sendJson(ctx, Map.of("success", false, "error", "Empty request body"));
+                    return;
+                }
                 com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
                 String command = json != null && json.has("command") ? json.get("command").getAsString() : "";
+                if (command.isEmpty()) {
+                    sendJson(ctx, Map.of("success", false, "error", "Empty command"));
+                    return;
+                }
                 CommandContext context = CommandContext.create(command, CommandSources.TERMINAL);
                 COMMAND.execute(context);
 
@@ -767,14 +817,30 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         } else if (HttpMethod.POST.equals(req.method())) {
             try {
                 String body = req.content().toString(CharsetUtil.UTF_8);
+                if (body == null || body.isEmpty()) {
+                    sendJson(ctx, Map.of("success", false, "error", "Empty request body"));
+                    return;
+                }
                 com.google.gson.JsonObject json = GSON.fromJson(body, com.google.gson.JsonObject.class);
+                if (json == null || !json.has("action")) {
+                    sendJson(ctx, Map.of("success", false, "error", "Missing action field"));
+                    return;
+                }
                 String action = json.get("action").getAsString();
                 switch (action) {
                     case "toggle" -> {
+                        if (!json.has("enabled")) {
+                            sendJson(ctx, Map.of("success", false, "error", "Missing enabled field"));
+                            return;
+                        }
                         CONFIG.server.extra.whitelist.enable = json.get("enabled").getAsBoolean();
                         sendJson(ctx, Map.of("success", true, "enabled", CONFIG.server.extra.whitelist.enable));
                     }
                     case "add" -> {
+                        if (!json.has("username")) {
+                            sendJson(ctx, Map.of("success", false, "error", "Missing username field"));
+                            return;
+                        }
                         String username = json.get("username").getAsString();
                         var result = PLAYER_LISTS.getWhitelist().add(username);
                         if (result.isPresent()) {
@@ -784,6 +850,10 @@ public class WebUIPlugin implements ZenithProxyPlugin {
                         }
                     }
                     case "remove" -> {
+                        if (!json.has("username")) {
+                            sendJson(ctx, Map.of("success", false, "error", "Missing username field"));
+                            return;
+                        }
                         String username = json.get("username").getAsString();
                         PLAYER_LISTS.getWhitelist().remove(username);
                         sendJson(ctx, Map.of("success", true));
@@ -849,6 +919,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         return fileCache.computeIfAbsent(path, p -> {
             try {
                 if (Files.exists(p) && !Files.isDirectory(p)) {
+                    // Evict oldest entry if cache exceeds size limit
+                    if (fileCache.size() >= FILE_CACHE_MAX_SIZE) {
+                        var it = fileCache.keySet().iterator();
+                        if (it.hasNext()) it.remove();
+                    }
                     return Files.readAllBytes(p);
                 }
             } catch (Exception ignored) {}
@@ -862,6 +937,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.length);
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.write(response);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
@@ -873,6 +949,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.NOT_FOUND);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, buf.readableBytes());
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.write(response);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
@@ -884,6 +961,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         HttpResponse httpResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
         httpResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         httpResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
+        httpResponse.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.write(httpResponse);
         ctx.write(new DefaultHttpContent(buf));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
@@ -893,7 +971,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.NO_CONTENT);
         response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS");
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type");
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization");
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_MAX_AGE, 86400);
+        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, 0);
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
     }
 
@@ -917,7 +997,13 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         @Override
         public com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandContext> register() {
             return literal("webui")
-                .then(literal("enable").executes(ctx -> { start(); ctx.getSource().getEmbed().title("WebUI Enabled").description("http://localhost:" + configManager.getConfig().port); return 1; }))
+                .then(literal("enable").executes(ctx -> {
+                    boolean ok = start();
+                    ctx.getSource().getEmbed()
+                        .title(ok ? "WebUI Enabled" : "WebUI Start Failed")
+                        .description(ok ? "http://localhost:" + configManager.getConfig().port : "检查日志了解详情");
+                    return ok ? 1 : 0;
+                }))
                 .then(literal("disable").executes(ctx -> { stop(); ctx.getSource().getEmbed().title("WebUI Disabled"); return 1; }))
                 .then(literal("status").executes(ctx -> {
                     String status = (serverChannel != null && serverChannel.isActive()) ? "Running" : "Stopped";
@@ -940,7 +1026,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
         @Override
         protected void append(ILoggingEvent event) {
-            if (instance == null) return;
+            WebUIPlugin inst = instance; // volatile read snapshot to avoid null after stop()
+            if (inst == null) return;
             if (event.getLevel() == ch.qos.logback.classic.Level.DEBUG) return;
             String logger = event.getLoggerName();
             if (logger == null || logger.isEmpty()) logger = "root";
@@ -953,7 +1040,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             if (tp != null) {
                 message += " " + tp.getClassName() + (tp.getMessage() != null ? ": " + tp.getMessage() : "");
             }
-            instance.broadcastLog(level, logger, message);
+            inst.broadcastLog(level, logger, message);
         }
     }
 }

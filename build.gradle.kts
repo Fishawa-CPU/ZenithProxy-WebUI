@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.zenith.webui"
-version = "1.0.0"
+version = "1.1.0"
 
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(21) }
@@ -19,7 +19,7 @@ dependencies {
 tasks.shadowJar {
     archiveClassifier.set("")
     archiveBaseName.set("ZenithProxy-WebUI")
-    archiveVersion.set("1.0.0")
+    archiveVersion.set("1.1.0")
     manifest {
         attributes(
             "Implementation-Title" to "ZenithProxy WebUI Plugin",

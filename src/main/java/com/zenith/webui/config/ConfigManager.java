@@ -34,8 +34,11 @@ public class ConfigManager {
                 LOG.info("Loaded WebUI config: port={}", config.port);
             } else {
                 config = new WebUIConfig();
+                // Generate a random password on first run to avoid default credentials
+                config.auth.password = java.util.UUID.randomUUID().toString().substring(0, 16);
                 save();
-                LOG.info("Created WebUI config with defaults");
+                LOG.info("Created WebUI config with defaults (random password generated)");
+                LOG.info("Default username: admin, password: {}", config.auth.password);
             }
         } catch (Exception e) {
             LOG.error("Failed to load config, using defaults", e);

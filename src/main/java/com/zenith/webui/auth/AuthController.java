@@ -137,6 +137,7 @@ public class AuthController {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 
         ctx.write(response);
         ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(bytes)));
@@ -152,6 +153,7 @@ public class AuthController {
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
         response.headers().set(HttpHeaderNames.SET_COOKIE, cookie);
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 
         ctx.write(response);
         ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(bytes)));

@@ -3,6 +3,7 @@ package com.zenith.webui.queue;
 import com.zenith.network.client.ClientSession;
 import com.zenith.network.codec.ClientEventLoopPacketHandler;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
 
 import java.util.Optional;
 
@@ -10,7 +11,9 @@ import static com.zenith.Globals.*;
 
 /**
  * 3c3u.org 服务器队列解析器
- * 拦截 Subtitle 包，解析格式: <onlinePlayers> | Position in queue: <position>
+ * 拦截 Subtitle 包，解析格式: &lt;onlinePlayers&gt; | Position in queue: &lt;position&gt;
+ *
+ * 队列完成检测：排队完成时服务器发送 ClearTitles 包清除字幕。
  */
 public class QueueParser implements ClientEventLoopPacketHandler<ClientboundSetSubtitleTextPacket, ClientSession> {
 
@@ -22,7 +25,6 @@ public class QueueParser implements ClientEventLoopPacketHandler<ClientboundSetS
 
     @Override
     public boolean applyAsync(ClientboundSetSubtitleTextPacket packet, ClientSession session) {
-        // Only parse for 3c3u.org
         String serverAddress = CONFIG.client.server.address;
         if (serverAddress == null || !serverAddress.toLowerCase().contains(TARGET_SERVER)) {
             return true;
@@ -79,6 +81,24 @@ public class QueueParser implements ClientEventLoopPacketHandler<ClientboundSetS
         } catch (Exception e) {
             CLIENT_LOG.warn("Error parsing queue info from text: {}", text, e);
             positionInQueue = -1;
+        }
+    }
+
+    /**
+     * 监听 ClearTitles 包作为队列完成信号。
+     * 排队完成时服务器会清除排队字幕，此时重置队列状态。
+     */
+    public static class ClearHandler implements ClientEventLoopPacketHandler<ClientboundClearTitlesPacket, ClientSession> {
+        @Override
+        public boolean applyAsync(ClientboundClearTitlesPacket packet, ClientSession session) {
+            String serverAddress = CONFIG.client.server.address;
+            if (serverAddress == null || !serverAddress.toLowerCase().contains(TARGET_SERVER)) {
+                return true;
+            }
+            if (positionInQueue > 0) {
+                reset();
+            }
+            return true;
         }
     }
 }

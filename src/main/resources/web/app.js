@@ -66,7 +66,7 @@ let terminalLogCount = 0;
 let currentConnected = false;
 let queueInitialized = false; // true after first status check
 let queueConnectedTime = 0;
-const QUEUE_LOADING_DELAY = 5000; // 5 seconds loading delay
+const QUEUE_LOADING_DELAY = 5000; // 5 seconds loading delay (only on initial page load)
 
 const KNOWN_COMMANDS = [
     'help', 'connect', 'disconnect', 'reconnect', 'cancel',
@@ -98,7 +98,16 @@ const KNOWN_COMMANDS = [
     'license',
 ];
 
-let serverCommands = KNOWN_COMMANDS;
+// Convert legacy string array to object array
+function normalizeCommands(cmds) {
+    if (!cmds || !cmds.length) return [];
+    if (typeof cmds[0] === 'string') return cmds.map(name => ({ name }));
+    return cmds;
+}
+
+let serverCommands = normalizeCommands(KNOWN_COMMANDS);
+// Quick lookup: alias -> name
+let aliasMap = {};
 
 // ── Init ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -200,9 +209,20 @@ async function loadDashboard() {
     document.getElementById('proxyStatus').style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
     document.getElementById('currentUsername').textContent = d.username || '-';
     document.getElementById('proxyAddress').textContent = d.proxyAddress || '-';
-    document.getElementById('mcVersion').textContent = d.version || '-';
-    const viaEl = document.getElementById('viaVersion');
-    if (viaEl) viaEl.textContent = d.viaVersion || '';
+    const mcEl = document.getElementById('mcVersion');
+    if (mcEl) {
+        // Preserve viaVersion <small> element inside mcVersion
+        const viaEl = document.getElementById('viaVersion');
+        const viaText = d.viaVersion || '';
+        if (viaEl) {
+            mcEl.textContent = '';
+            mcEl.appendChild(document.createTextNode(d.version || '-'));
+            mcEl.appendChild(viaEl);
+            viaEl.textContent = viaText;
+        } else {
+            mcEl.textContent = d.version || '-';
+        }
+    }
     document.getElementById('version').textContent = 'v' + (d.version || '?');
 
     // Connected state for queue loading
@@ -251,27 +271,34 @@ function renderQueue(q) {
         return;
     }
 
-    // 4-second loading delay on connect
-    const elapsed = Date.now() - queueConnectedTime;
-    if (elapsed < QUEUE_LOADING_DELAY) {
-        posEl.textContent = '正在加载...';
-        posEl.style.color = 'var(--ctp-overlay0)';
-        if (onlineEl) onlineEl.textContent = '';
-        return;
+    // Only show loading on initial page load transition, not on queue-complete transition
+    const wasInQueue = q && q.inQueue && q.position > 0;
+    if (!wasInQueue && queueConnectedTime > 0) {
+        const elapsed = Date.now() - queueConnectedTime;
+        if (elapsed < QUEUE_LOADING_DELAY) {
+            posEl.textContent = '正在加载...';
+            posEl.style.color = 'var(--ctp-overlay0)';
+            if (onlineEl) onlineEl.textContent = '';
+            return;
+        }
+        queueConnectedTime = 0;
     }
 
-    if (q && q.inQueue && q.position > 0) {
+    if (wasInQueue) {
         posEl.textContent = `队列位置: ${q.position}`;
         posEl.style.color = 'var(--ctp-yellow)';
         if (onlineEl) {
             onlineEl.textContent = q.onlinePlayers > 0 ? `在线人数: ${q.onlinePlayers}` : '';
         }
+        // Reset loading timer while in queue
+        queueConnectedTime = 0;
     } else {
         posEl.textContent = '已进入';
         posEl.style.color = 'var(--ctp-green)';
         if (onlineEl) {
             onlineEl.textContent = q && q.onlinePlayers > 0 ? `在线人数: ${q.onlinePlayers}` : '';
         }
+        queueConnectedTime = 0;
     }
 }
 
@@ -284,6 +311,48 @@ const chartColors = {
     grid: 'rgba(110, 115, 141, 0.15)', text: '#8087a2',
 };
 
+function pushChartData(chart, value, label) {
+    chart.data.datasets[0].data.push(value);
+    chart.data.labels.push(label);
+    if (chart.data.datasets[0].data.length > MAX_DATA_POINTS) {
+        chart.data.datasets[0].data.shift();
+        chart.data.labels.shift();
+    }
+    autoScaleChart(chart);
+    chart.update('none');
+}
+
+function pushChartDataMulti(chart, values, label) {
+    for (let i = 0; i < values.length; i++) {
+        chart.data.datasets[i].data.push(values[i]);
+    }
+    chart.data.labels.push(label);
+    if (chart.data.datasets[0].data.length > MAX_DATA_POINTS) {
+        for (let i = 0; i < chart.data.datasets.length; i++) {
+            chart.data.datasets[i].data.shift();
+        }
+        chart.data.labels.shift();
+    }
+    autoScaleChart(chart);
+    chart.update('none');
+}
+
+function autoScaleChart(chart) {
+    let maxVal = 0;
+    for (const ds of chart.data.datasets) {
+        for (const v of ds.data) {
+            if (v > maxVal) maxVal = v;
+        }
+    }
+    // Add 20% headroom, minimum of 10
+    const newMax = Math.max(maxVal * 1.2, 10);
+    // Only update if significant change (>10%)
+    const currentMax = chart.options.scales.y.max;
+    if (currentMax === undefined || currentMax === null || Math.abs(newMax - currentMax) / currentMax > 0.1) {
+        chart.options.scales.y.max = Math.ceil(newMax);
+    }
+}
+
 function makeTimeLabels(count) {
     const labels = [], now = new Date();
     for (let i = count - 1; i >= 0; i--) { const t = new Date(now - i * 5000); labels.push(t.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })); }
@@ -291,19 +360,21 @@ function makeTimeLabels(count) {
 }
 
 function makeChartOptions(unit, max) {
+    const yScale = { display: true, min: 0, grid: { color: chartColors.grid }, ticks: { color: chartColors.text, font: { size: 10 }, maxTicksLimit: 5, callback: v => v + (unit || '') } };
+    if (max !== undefined && max !== null) yScale.max = max;
     return {
         responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
         interaction: { intersect: false, mode: 'index' },
         plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(30,32,48,0.95)', titleColor: '#cad3f5', bodyColor: '#b8c0e0', borderColor: 'rgba(91,96,120,0.5)', borderWidth: 1, padding: 8 } },
         scales: {
             x: { display: true, grid: { color: chartColors.grid }, ticks: { color: chartColors.text, font: { size: 10 }, maxTicksLimit: 6 } },
-            y: { display: true, min: 0, suggestedMax: max, grid: { color: chartColors.grid }, ticks: { color: chartColors.text, font: { size: 10 }, maxTicksLimit: 5, callback: v => v + (unit || '') } }
+            y: yScale
         }
     };
 }
 
 function makeDS(label, color, bg) {
-    return { label, data: [], borderColor: color, backgroundColor: bg, borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 };
+    return { label, data: [], borderColor: color, backgroundColor: bg, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 0, fill: true, tension: 0.3 };
 }
 
 function initCharts() {
@@ -356,6 +427,23 @@ function processDashboardData(d) {
         statusEl.style.color = d.connected ? 'var(--success-color)' : 'var(--error-color)';
     }
 
+    // Version & Via
+    if (d.version) {
+        const mcEl = document.getElementById('mcVersion');
+        if (mcEl) {
+            const viaEl = document.getElementById('viaVersion');
+            const viaText = d.viaVersion || '';
+            if (viaEl) {
+                mcEl.textContent = '';
+                mcEl.appendChild(document.createTextNode(d.version));
+                mcEl.appendChild(viaEl);
+                viaEl.textContent = viaText;
+            } else {
+                mcEl.textContent = d.version;
+            }
+        }
+    }
+
     // Player connection - simple status
     const pc = document.getElementById('playerConnection');
     const hasPlayers = d.latency && d.latency.players && d.latency.players.length > 0;
@@ -400,24 +488,26 @@ function processDashboardData(d) {
 
     // Charts
     const sys = d.system;
-    if (sys && cpuChart) { cpuChart.data.datasets[0].data.push(Math.max(0, sys.cpuLoad || 0)); cpuChart.data.labels.push(now); if (cpuChart.data.datasets[0].data.length > MAX_DATA_POINTS) { cpuChart.data.datasets[0].data.shift(); cpuChart.data.labels.shift(); } cpuChart.update('none'); }
-    if (sys && memoryChart) { memoryChart.data.datasets[0].data.push(sys.memoryPercent || 0); memoryChart.data.labels.push(now); if (memoryChart.data.datasets[0].data.length > MAX_DATA_POINTS) { memoryChart.data.datasets[0].data.shift(); memoryChart.data.labels.shift(); } memoryChart.update('none'); }
-    if (sys && networkChart) { networkChart.data.datasets[0].data.push(Math.round((sys.netBytesPerSecIn || 0) / 1024 * 10) / 10); networkChart.data.datasets[1].data.push(Math.round((sys.netBytesPerSecOut || 0) / 1024 * 10) / 10); networkChart.data.labels.push(now); if (networkChart.data.datasets[0].data.length > MAX_DATA_POINTS) { networkChart.data.datasets[0].data.shift(); networkChart.data.datasets[1].data.shift(); networkChart.data.labels.shift(); } networkChart.update('none'); }
+    if (sys && cpuChart) { pushChartData(cpuChart, Math.max(0, sys.cpuLoad || 0), now); }
+    if (sys && memoryChart) { pushChartData(memoryChart, sys.memoryPercent || 0, now); }
+    if (sys && networkChart) {
+        pushChartDataMulti(networkChart, [
+            Math.round((sys.netBytesPerSecIn || 0) / 1024 * 10) / 10,
+            Math.round((sys.netBytesPerSecOut || 0) / 1024 * 10) / 10
+        ], now);
+    }
 
     // Latency
     const lat = d.latency;
     if (lat && latencyChart) {
-        latencyChart.data.datasets[0].data.push(d.connected ? (lat.botLatency || 0) : 0);
+        const botLat = d.connected ? (lat.botLatency || 0) : 0;
         let avgPlayerPing = 0;
         if (lat.players && lat.players.length > 0) {
             let sum = 0;
             for (const p of lat.players) sum += (p.ping || 0);
             avgPlayerPing = Math.round(sum / lat.players.length);
         }
-        latencyChart.data.datasets[1].data.push(avgPlayerPing);
-        latencyChart.data.labels.push(now);
-        if (latencyChart.data.datasets[0].data.length > MAX_DATA_POINTS) { latencyChart.data.datasets[0].data.shift(); latencyChart.data.datasets[1].data.shift(); latencyChart.data.labels.shift(); }
-        latencyChart.update('none');
+        pushChartDataMulti(latencyChart, [botLat, avgPlayerPing], now);
 
         const detail = document.getElementById('latencyDetail');
         if (detail) {
@@ -436,7 +526,19 @@ async function loadCommands() {
         const r = await fetch(API_BASE + '/commands', { credentials: 'include' });
         if (r.status === 401) { window.location.href = '/login.html'; return; }
         const d = await r.json();
-        if (Array.isArray(d) && d.length > 0) serverCommands = d.sort();
+        if (Array.isArray(d) && d.length > 0) {
+            serverCommands = normalizeCommands(d);
+            serverCommands.sort((a, b) => a.name.localeCompare(b.name));
+            // Build alias lookup
+            aliasMap = {};
+            for (const cmd of serverCommands) {
+                if (cmd.aliases && Array.isArray(cmd.aliases)) {
+                    for (const alias of cmd.aliases) {
+                        aliasMap[alias.toLowerCase()] = cmd.name;
+                    }
+                }
+            }
+        }
     } catch (e) {}
 }
 
@@ -487,7 +589,12 @@ function initTerminal() {
         // Ctrl+C to cancel
         else if (e.key === 'c' && e.ctrlKey && !window.getSelection().toString()) { e.preventDefault(); appendTerminalLine('^C', 'terminal-line-info'); input.value = ''; }
     });
-    input.addEventListener('input', hideAutocomplete);
+    input.addEventListener('input', () => {
+        const dropdown = document.getElementById('autocompleteDropdown');
+        if (dropdown.classList.contains('visible')) {
+            showAutocomplete(input.value);
+        }
+    });
     document.addEventListener('click', (e) => { if (!e.target.closest('.terminal-input-wrapper')) hideAutocomplete(); });
 
     updateTerminalStatus();
@@ -517,19 +624,236 @@ async function sendTerminalCommand(command) {
 }
 
 // ── Autocomplete ──────────────────────────────
+const MAX_SUGGESTIONS = 20;
+
+// Score a command against the user query — higher is better
+function scoreCommand(cmd, q) {
+    const name = cmd.name.toLowerCase();
+    // Also check aliases
+    const aliases = (cmd.aliases || []).map(a => a.toLowerCase());
+    const targets = [name, ...aliases];
+
+    let best = -1;
+    let bestAlias = null;
+    for (let i = 0; i < targets.length; i++) {
+        const target = targets[i];
+        let score = -1;
+
+        // 1. Exact match
+        if (target === q) { score = 1000; }
+
+        // 2. Prefix match (e.g., "conn" → "connect")
+        else if (target.startsWith(q)) { score = 800 - target.length; }
+
+        // 3. Word-boundary prefix match (e.g., "fish" → "autoFish")
+        else { score = wordBoundaryMatch(target, q); }
+
+        // 4. Substring match (e.g., "stat" → "queueStatus")
+        if (score < 0 && target.includes(q)) { score = 300; }
+
+        // 5. Fuzzy match (characters in order with gaps)
+        if (score < 0) { score = fuzzyMatch(target, q); }
+
+        // 6. Multi-word match (e.g., "server sw" → "server switch")
+        if (score < 0) { score = multiWordMatch(target, q); }
+
+        if (score > best) {
+            best = score;
+            bestAlias = i > 0 ? cmd.aliases[i - 1] : null;
+        }
+    }
+
+    if (best >= 0 && bestAlias) {
+        cmd._aliasMatch = bestAlias;
+    }
+    return best;
+}
+
+// Match camelCase or word boundaries: "aR" → "autoReconnect", "cc" → "chatColor"
+function wordBoundaryMatch(target, q) {
+    // Find positions where a lowercase→uppercase transition occurs (camelCase)
+    const boundaries = [0];
+    for (let i = 1; i < target.length; i++) {
+        if (target[i] !== target[i].toLowerCase() && target[i - 1] === target[i - 1].toLowerCase()) {
+            boundaries.push(i);
+        }
+        // Also treat space/hyphen/underscore boundaries
+        if (target[i - 1] === ' ' || target[i - 1] === '-' || target[i - 1] === '_') {
+            boundaries.push(i);
+        }
+    }
+    // Also treat boundaries after digits
+    for (let i = 1; i < target.length; i++) {
+        if (/\d/.test(target[i]) && !/\d/.test(target[i - 1])) boundaries.push(i);
+        if (!/\d/.test(target[i]) && /\d/.test(target[i - 1])) boundaries.push(i);
+    }
+
+    for (const b of boundaries) {
+        if (target.startsWith(q, b)) {
+            return 600 - target.length + b; // earlier boundary is slightly better
+        }
+    }
+    return -1;
+}
+
+// Fuzzy match: all characters of q appear in target in order (gaps allowed)
+function fuzzyMatch(target, q) {
+    let ti = 0, qi = 0;
+    let gaps = 0;
+    while (ti < target.length && qi < q.length) {
+        if (target[ti] === q[qi]) { ti++; qi++; }
+        else { ti++; gaps++; }
+    }
+    if (qi === q.length) return 150 - gaps;
+    return -1;
+}
+
+// Multi-word match: "server sw" → "server switch"
+function multiWordMatch(target, q) {
+    const qWords = q.split(/\s+/).filter(Boolean);
+    const tWords = target.split(/\s+/).filter(Boolean);
+    if (qWords.length <= 1) return -1;
+    if (qWords.length > tWords.length) return -1;
+
+    let score = 700;
+    for (let i = 0; i < qWords.length - 1; i++) {
+        if (tWords[i] !== qWords[i]) return -1; // all but last word must be exact
+    }
+    const lastQ = qWords[qWords.length - 1];
+    const lastT = tWords[qWords.length - 1];
+    if (lastT.startsWith(lastQ)) { score += 100 - lastT.length; }
+    else if (lastT.includes(lastQ)) { score += 20; }
+    else return -1;
+    return score;
+}
+
+// Build highlighted HTML for a matched command name
+function highlightMatch(name, q) {
+    if (!q) return escapeHtml(name);
+    const lower = name.toLowerCase();
+    const qLower = q.toLowerCase();
+
+    // Find best match span to highlight
+    let start = -1, end = -1;
+    if (lower.startsWith(qLower)) {
+        start = 0; end = qLower.length;
+    } else if (lower.includes(qLower)) {
+        start = lower.indexOf(qLower); end = start + qLower.length;
+    } else {
+        // Fuzzy: find first matching span greedily
+        let qi = 0, first = -1, last = -1;
+        for (let i = 0; i < lower.length && qi < qLower.length; i++) {
+            if (lower[i] === qLower[qi]) {
+                if (first === -1) first = i;
+                last = i;
+                qi++;
+            }
+        }
+        if (qi === qLower.length) { start = first; end = last + 1; }
+    }
+
+    if (start >= 0) {
+        return escapeHtml(name.substring(0, start))
+            + '<span class="autocomplete-highlight">' + escapeHtml(name.substring(start, end)) + '</span>'
+            + escapeHtml(name.substring(end));
+    }
+    return escapeHtml(name);
+}
+
+let autocompleteResultCache = null;
+let autocompleteCacheKey = '';
+
 function showAutocomplete(value) {
     const dropdown = document.getElementById('autocompleteDropdown');
     const q = value.trim().toLowerCase();
-    autocompleteSuggestions = !q ? [...serverCommands] : serverCommands.filter(c => c.toLowerCase().includes(q));
+
+    // Use cache when query is a prefix of the previous query
+    const cacheValid = autocompleteResultCache && q.startsWith(autocompleteCacheKey);
+
+    if (!q) {
+        autocompleteSuggestions = serverCommands.slice(0, MAX_SUGGESTIONS);
+    } else if (cacheValid) {
+        // Filter cached results with the longer query
+        autocompleteSuggestions = autocompleteResultCache.filter(c => c._score >= 0);
+    } else {
+        // Score all commands
+        const scored = serverCommands.map(c => ({
+            ...c,
+            _score: scoreCommand(c, q)
+        })).filter(c => c._score >= 0)
+          .sort((a, b) => b._score - a._score)
+          .slice(0, MAX_SUGGESTIONS);
+        autocompleteSuggestions = scored;
+        autocompleteResultCache = scored;
+        autocompleteCacheKey = q;
+    }
+
     if (!autocompleteSuggestions.length) { hideAutocomplete(); return; }
     autocompleteIndex = -1;
-    dropdown.innerHTML = autocompleteSuggestions.map((c, i) => `<div class="autocomplete-item" onmousedown="selectAutocompleteAt(${i})">${c}</div>`).join('');
+
+    dropdown.innerHTML = autocompleteSuggestions.map((c, i) => {
+        const desc = c.description ? `<span class="autocomplete-desc">${escapeHtml(c.description)}</span>` : '';
+        const aliasHint = c._aliasMatch ? `<span class="autocomplete-alias-hint">← ${escapeHtml(c._aliasMatch)}</span>` : '';
+        return `<div class="autocomplete-item" onmousedown="selectAutocompleteAt(${i})">
+            <span class="autocomplete-name">${highlightMatch(c.name, q)}</span>${aliasHint}${desc}
+        </div>`;
+    }).join('');
     dropdown.classList.add('visible');
 }
-function navigateAutocomplete(d) { const items = document.querySelectorAll('.autocomplete-item'); if (!items.length) return; if (autocompleteIndex >= 0) items[autocompleteIndex].classList.remove('selected'); autocompleteIndex += d; if (autocompleteIndex < 0) autocompleteIndex = items.length - 1; if (autocompleteIndex >= items.length) autocompleteIndex = 0; items[autocompleteIndex].classList.add('selected'); items[autocompleteIndex].scrollIntoView({ block: 'nearest' }); }
-function selectAutocomplete() { if (autocompleteIndex >= 0 && autocompleteIndex < autocompleteSuggestions.length) document.getElementById('terminalInput').value = autocompleteSuggestions[autocompleteIndex] + ' '; hideAutocomplete(); }
-function selectAutocompleteAt(i) { document.getElementById('terminalInput').value = autocompleteSuggestions[i] + ' '; hideAutocomplete(); document.getElementById('terminalInput').focus(); }
-function hideAutocomplete() { autocompleteIndex = -1; const d = document.getElementById('autocompleteDropdown'); d.classList.remove('visible'); d.innerHTML = ''; }
+
+function navigateAutocomplete(d) {
+    const items = document.querySelectorAll('.autocomplete-item');
+    if (!items.length) return;
+    if (autocompleteIndex >= 0) items[autocompleteIndex].classList.remove('selected');
+    autocompleteIndex += d;
+    if (autocompleteIndex < 0) autocompleteIndex = items.length - 1;
+    if (autocompleteIndex >= items.length) autocompleteIndex = 0;
+    items[autocompleteIndex].classList.add('selected');
+    items[autocompleteIndex].scrollIntoView({ block: 'nearest' });
+}
+
+function selectAutocomplete() {
+    if (autocompleteIndex >= 0 && autocompleteIndex < autocompleteSuggestions.length) {
+        const cmd = autocompleteSuggestions[autocompleteIndex];
+        const input = document.getElementById('terminalInput');
+        // Preserve multi-word prefix: if user typed "server", fill "server switch"
+        const qWords = input.value.trim().split(/\s+/).filter(Boolean);
+        if (qWords.length > 1) {
+            // Replace only the last word with the completed command's matching part
+            const selectedWords = cmd.name.split(/\s+/);
+            qWords[qWords.length - 1] = selectedWords[selectedWords.length - 1];
+            input.value = qWords.join(' ') + ' ';
+        } else {
+            input.value = cmd.name + ' ';
+        }
+    }
+    hideAutocomplete();
+}
+
+function selectAutocompleteAt(i) {
+    const cmd = autocompleteSuggestions[i];
+    const input = document.getElementById('terminalInput');
+    const qWords = input.value.trim().split(/\s+/).filter(Boolean);
+    if (qWords.length > 1) {
+        const selectedWords = cmd.name.split(/\s+/);
+        qWords[qWords.length - 1] = selectedWords[selectedWords.length - 1];
+        input.value = qWords.join(' ') + ' ';
+    } else {
+        input.value = cmd.name + ' ';
+    }
+    hideAutocomplete();
+    input.focus();
+}
+
+function hideAutocomplete() {
+    autocompleteIndex = -1;
+    autocompleteResultCache = null;
+    autocompleteCacheKey = '';
+    const d = document.getElementById('autocompleteDropdown');
+    if (!d) return;
+    d.classList.remove('visible');
+    d.innerHTML = '';
+}
 
 // ── Terminal output ───────────────────────────
 function addLogEntry(log) {
@@ -571,9 +895,6 @@ function clearTerminal() {
     terminalCmdCount = 0;
     updateTerminalCounts();
 }
-
-let terminalCmdCountDisplay = 0;
-let terminalLogCountDisplay = 0;
 
 function updateTerminalCounts() {
     const cmdEl = document.getElementById('terminalCmdCount');

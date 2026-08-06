@@ -661,12 +661,14 @@ body {
     bottom: 100%;
     left: 0;
     right: 0;
-    max-height: 240px;
+    max-height: 300px;
     overflow-y: auto;
     background-color: var(--ctp-mantle);
     border: 1px solid var(--ctp-surface1);
     border-bottom: none;
+    border-radius: 6px 6px 0 0;
     z-index: 200;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .autocomplete-dropdown.visible {
@@ -674,12 +676,17 @@ body {
 }
 
 .autocomplete-item {
-    padding: 8px 16px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 14px;
     font-size: 0.82rem;
     color: var(--ctp-subtext1);
     cursor: pointer;
     transition: background-color 0.1s ease;
-    font-family: 'JetBrains Mono', 'Menlo', monospace;
+    font-family: 'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+    white-space: nowrap;
+    overflow: hidden;
 }
 
 .autocomplete-item:hover,
@@ -687,6 +694,35 @@ body {
     background-color: var(--ctp-surface0);
     color: var(--ctp-text);
     border-left: 2px solid var(--ctp-mauve);
+    padding-left: 12px;
+}
+
+.autocomplete-name {
+    color: var(--ctp-text);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.autocomplete-highlight {
+    color: var(--ctp-mauve);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.autocomplete-alias-hint {
+    color: var(--ctp-overlay0);
+    font-size: 0.72rem;
+    font-style: italic;
+    flex-shrink: 0;
+}
+
+.autocomplete-desc {
+    color: var(--ctp-overlay1);
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 /* ── Players ────────────────────────────────── */
