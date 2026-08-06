@@ -5,6 +5,7 @@ import com.zenith.webui.api.*;
 import com.zenith.webui.auth.AuthController;
 import com.zenith.webui.auth.AuthHandler;
 import com.zenith.webui.staticfile.StaticFileHandler;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.*;
@@ -13,8 +14,9 @@ import java.util.Map;
 
 /**
  * Netty channel handler — routes incoming HTTP requests to the appropriate handler.
- * Manages SSE client lifecycle and token extraction.
+ * Stateless and thread-safe, shared across all connections via {@code @Sharable}.
  */
+@ChannelHandler.Sharable
 public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     private final AuthHandler authHandler;
