@@ -2,11 +2,15 @@ package com.zenith.webui.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.SecureRandom;
 
 public class ConfigManager {
     private static final ComponentLogger LOG = ComponentLogger.logger("WebUI");
@@ -22,48 +26,94 @@ public class ConfigManager {
     }
 
     public void loadOrCreate() {
-        try {
-            Files.createDirectories(configDir);
+        mkdirs(configDir);
 
-            if (Files.exists(configFile)) {
-                String content = Files.readString(configFile);
-                config = GSON.fromJson(content, WebUIConfig.class);
-                if (config == null) {
-                    config = new WebUIConfig();
-                }
-                LOG.info("Loaded WebUI config: port={}", config.port);
+        if (Files.exists(configFile)) {
+            WebUIConfig parsed = parseConfig(configFile);
+            if (parsed == null || !isValid(parsed)) {
+                // Corrupted (bad JSON or invalid fields) — backup and regenerate
+                backupAndRegenerate(parsed == null ? "malformed JSON" : "invalid fields");
             } else {
-                config = new WebUIConfig();
-                // Generate a random password on first run to avoid default credentials
-                config.auth.password = java.util.UUID.randomUUID().toString().substring(0, 16);
-                save();
-                LOG.info("Created WebUI config with defaults (random password generated)");
-                LOG.info("Default username: admin, password: {}", config.auth.password);
+                config = parsed;
+                LOG.info("Loaded WebUI config: port={}", config.port);
             }
-        } catch (Exception e) {
-            LOG.error("Failed to load config, using defaults", e);
-            config = new WebUIConfig();
+        } else {
+            config = freshConfig();
+            save();
+            LOG.info("Created WebUI config: username={}, password={}",
+                config.auth.username, config.auth.password);
         }
+    }
+
+    private WebUIConfig parseConfig(Path file) {
+        try {
+            String content = Files.readString(file);
+            return GSON.fromJson(content, WebUIConfig.class);
+        } catch (JsonSyntaxException e) {
+            LOG.warn("Config JSON is malformed: {}", e.getMessage());
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read config file: " + file, e);
+        }
+    }
+
+    private static boolean isValid(WebUIConfig c) {
+        if (c == null) return false;
+        if (c.port < 1 || c.port > 65535) return false;
+        if (c.auth == null) return false;
+        if (c.auth.username == null || c.auth.username.isBlank()) return false;
+        if (c.auth.password == null || c.auth.password.isBlank()) return false;
+        return true;
+    }
+
+    /** Backup corrupted file as .bak, then regenerate from scratch. */
+    private void backupAndRegenerate(String reason) {
+        Path bakFile = configDir.resolve("config.json.bak");
+        try {
+            Files.move(configFile, bakFile, StandardCopyOption.REPLACE_EXISTING);
+            LOG.warn("Config {} — backed up to {}", reason, bakFile.getFileName());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to backup corrupted config", e);
+        }
+        config = freshConfig();
+        save();
+        LOG.info("Regenerated WebUI config with random password");
+    }
+
+    private static WebUIConfig freshConfig() {
+        WebUIConfig c = new WebUIConfig();
+        c.auth.password = generateRandomPassword();
+        return c;
     }
 
     public void save() {
         try {
-            Files.createDirectories(configDir);
+            mkdirs(configDir);
             Files.writeString(configFile, GSON.toJson(config));
         } catch (IOException e) {
-            LOG.error("Failed to save config", e);
+            throw new UncheckedIOException("Failed to save config: " + configFile, e);
         }
     }
 
-    public WebUIConfig getConfig() {
-        return config;
+    public WebUIConfig getConfig() { return config; }
+    public Path getConfigDir() { return configDir; }
+    public Path getConfigFile() { return configFile; }
+
+    private static void mkdirs(Path dir) {
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create directory: " + dir, e);
+        }
     }
 
-    public Path getConfigDir() {
-        return configDir;
-    }
-
-    public Path getConfigFile() {
-        return configFile;
+    private static String generateRandomPassword() {
+        byte[] bytes = new byte[16];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(32);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString().substring(0, 16);
     }
 }

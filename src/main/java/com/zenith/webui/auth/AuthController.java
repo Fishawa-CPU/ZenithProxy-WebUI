@@ -1,7 +1,7 @@
 package com.zenith.webui.auth;
 
 import com.google.gson.JsonObject;
-import com.zenith.webui.WebUIPlugin;
+import com.zenith.webui.http.HttpHelper;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -29,7 +29,7 @@ public class AuthController {
     public void handleLogin(ChannelHandlerContext ctx, FullHttpRequest request) {
         try {
             String body = request.content().toString(StandardCharsets.UTF_8);
-            JsonObject json = WebUIPlugin.GSON.fromJson(body, JsonObject.class);
+            JsonObject json = HttpHelper.GSON.fromJson(body, JsonObject.class);
 
             if (json == null || !json.has("username") || !json.has("password")) {
                 sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
@@ -131,7 +131,7 @@ public class AuthController {
     }
 
     private void sendJson(ChannelHandlerContext ctx, HttpResponseStatus status, Object obj) {
-        String json = WebUIPlugin.GSON.toJson(obj);
+        String json = HttpHelper.GSON.toJson(obj);
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
 
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
@@ -146,7 +146,7 @@ public class AuthController {
 
     private void sendJsonWithCookie(ChannelHandlerContext ctx, HttpResponseStatus status,
                                      Object obj, String cookie) {
-        String json = WebUIPlugin.GSON.toJson(obj);
+        String json = HttpHelper.GSON.toJson(obj);
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
 
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
