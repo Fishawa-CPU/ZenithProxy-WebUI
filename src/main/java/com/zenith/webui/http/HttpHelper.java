@@ -31,6 +31,41 @@ public final class HttpHelper {
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
     }
 
+    /** Send a pre-built JSON string as response, bypassing Gson serialization. */
+    public static void sendJsonString(ChannelHandlerContext ctx, String json) {
+        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        ByteBuf buf = Unpooled.wrappedBuffer(bytes);
+        HttpResponse httpResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+        httpResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+        httpResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
+        httpResponse.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        ctx.write(httpResponse);
+        ctx.write(new DefaultHttpContent(buf));
+        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+    }
+
+    /**
+     * Append {@code s} to {@code sb}, escaping JSON control characters.
+     * Inline (no allocation) for strings that contain no special chars.
+     */
+    public static void escapeJson(StringBuilder sb, String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\b': sb.append("\\b");  break;
+                case '\f': sb.append("\\f");  break;
+                case '\n': sb.append("\\n");  break;
+                case '\r': sb.append("\\r");  break;
+                case '\t': sb.append("\\t");  break;
+                default:
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+            }
+        }
+    }
+
     public static void sendBytes(ChannelHandlerContext ctx, byte[] content, String contentType) {
         ByteBuf buf = Unpooled.wrappedBuffer(content);
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);

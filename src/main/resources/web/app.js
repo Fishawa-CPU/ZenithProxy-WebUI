@@ -57,6 +57,8 @@ let chartsInitialized = false;
 
 // Log SSE stream
 let logEventSource = null;
+let logReconnectDelay = 1000;
+const MAX_RECONNECT_DELAY = 30000;
 
 // Terminal command tracking
 let terminalCmdCount = 0;
@@ -195,8 +197,14 @@ function startLogPolling() {
             addLogEntry(log);
         } catch (e) {}
     };
+    logEventSource.onopen = () => {
+        logReconnectDelay = 1000; // reset on successful connection
+    };
     logEventSource.onerror = () => {
-        // SSE will auto-reconnect
+        logEventSource.close();
+        logEventSource = null;
+        setTimeout(startLogPolling, logReconnectDelay);
+        logReconnectDelay = Math.min(logReconnectDelay * 2, MAX_RECONNECT_DELAY);
     };
 }
 
@@ -391,6 +399,7 @@ function initCharts() {
 }
 
 let dashboardEventSource = null;
+let dashboardReconnectDelay = 1000;
 
 function startSystemPolling() {
     if (dashboardEventSource) return;
@@ -402,8 +411,14 @@ function startSystemPolling() {
             processDashboardData(d);
         } catch (e) {}
     };
+    dashboardEventSource.onopen = () => {
+        dashboardReconnectDelay = 1000; // reset on successful connection
+    };
     dashboardEventSource.onerror = () => {
-        // SSE will auto-reconnect
+        dashboardEventSource.close();
+        dashboardEventSource = null;
+        setTimeout(startSystemPolling, dashboardReconnectDelay);
+        dashboardReconnectDelay = Math.min(dashboardReconnectDelay * 2, MAX_RECONNECT_DELAY);
     };
     // Fetch once immediately via HTTP while SSE connects
     apiCall('/dashboard').then(d => { if (d && currentPage === 'dashboard') processDashboardData(d); });

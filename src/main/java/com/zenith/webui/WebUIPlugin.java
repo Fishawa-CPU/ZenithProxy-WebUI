@@ -36,6 +36,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.Clien
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -294,21 +295,31 @@ public class WebUIPlugin implements ZenithProxyPlugin {
      * Uses retainedDuplicate to avoid per-channel ByteBuf allocation.
      * @param sseFrame pre-built SSE frame string (format: "data: {...}\n\n")
      */
+    /**
+     * Write a pre-built SSE data frame to every active channel in {@code clients}.
+     * Collects dead channels for batch removal — avoids CopyOnWriteArrayList.removeIf
+     * which copies the entire array even when nothing is removed.
+     * @param sseFrame pre-built SSE frame string (format: "data: {...}\n\n")
+     */
     public static void broadcastSSE(List<Channel> clients, String sseFrame) {
         ByteBuf template = Unpooled.copiedBuffer(sseFrame, CharsetUtil.UTF_8);
-        clients.removeIf(ch -> {
+        List<Channel> dead = new ArrayList<>(2);
+        for (Channel ch : clients) {
             if (!ch.isActive()) {
-                return true;
+                dead.add(ch);
+                continue;
             }
             try {
                 ch.writeAndFlush(new DefaultHttpContent(template.retainedDuplicate()))
                     .addListener(f -> { if (!f.isSuccess()) ch.close(); });
-                return false;
             } catch (Exception e) {
                 ch.close();
-                return true;
+                dead.add(ch);
             }
-        });
+        }
+        if (!dead.isEmpty()) {
+            clients.removeAll(dead);
+        }
         template.release();
     }
 
