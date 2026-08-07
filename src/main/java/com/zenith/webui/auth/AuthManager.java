@@ -57,12 +57,11 @@ public class AuthManager {
 
         // IP-based rate limiting (stale entries cleaned by background task)
         String rateKey = clientIp + ":" + (System.currentTimeMillis() / RATE_LIMIT_WINDOW_MS);
-        Integer attempts = rateLimitMap.get(rateKey);
-        if (attempts != null && attempts >= MAX_ATTEMPTS_PER_MINUTE) {
+        int attempts = rateLimitMap.compute(rateKey, (k, v) -> v == null ? 1 : v + 1);
+        if (attempts > MAX_ATTEMPTS_PER_MINUTE) {
             LOG.warn("Rate limit exceeded for IP: {}", clientIp);
             return null;
         }
-        rateLimitMap.put(rateKey, attempts != null ? attempts + 1 : 1);
 
         // Constant-time comparison using pre-computed byte arrays
         if (secureEquals(usernameBytes, username.getBytes(StandardCharsets.UTF_8))
