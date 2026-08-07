@@ -23,11 +23,11 @@
 ./gradlew shadowJar
 ```
 
-输出文件：`build/libs/ZenithProxy-WebUI-1.0.0.jar`
+输出文件：`build/libs/ZenithProxy-WebUI-1.2.0.jar`
 
 ### 2. 安装插件
 
-将 `ZenithProxy-WebUI-1.0.0.jar` 复制到 ZenithProxy 的 `plugins/` 目录。
+将 `ZenithProxy-WebUI-1.2.0.jar` 复制到 ZenithProxy 的 `plugins/` 目录。
 
 ### 3. 配置文件
 
