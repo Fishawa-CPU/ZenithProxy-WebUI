@@ -91,6 +91,7 @@ public class AuthManager {
 
         if (now > tokenInfo.expiry) {
             tokens.remove(token);
+            cleanupTokenChannel(token);
             return null;
         }
 
@@ -119,11 +120,7 @@ public class AuthManager {
     public void invalidateToken(String token) {
         if (token == null) return;
         tokens.remove(token);
-        Channel ch = tokenChannels.remove(token);
-        if (ch != null) {
-            ch.close();
-            LOG.info("SSE channel closed for invalidated token");
-        }
+        cleanupTokenChannel(token);
     }
 
     /**
@@ -134,8 +131,7 @@ public class AuthManager {
         if (username == null) return;
         tokens.entrySet().removeIf(e -> {
             if (username.equals(e.getValue().username)) {
-                Channel ch = tokenChannels.remove(e.getKey());
-                if (ch != null) ch.close();
+                cleanupTokenChannel(e.getKey());
                 return true;
             }
             return false;
@@ -158,9 +154,16 @@ public class AuthManager {
         long expiry = System.currentTimeMillis() + config.tokenExpiry;
         tokens.put(token, new TokenInfo(username, expiry));
 
-        // Cleanup expired tokens periodically
+        // Cleanup expired tokens (and their SSE channels) when map grows large
         if (tokens.size() > 100) {
-            tokens.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expiry);
+            long now = System.currentTimeMillis();
+            tokens.entrySet().removeIf(e -> {
+                if (now > e.getValue().expiry) {
+                    cleanupTokenChannel(e.getKey());
+                    return true;
+                }
+                return false;
+            });
         }
 
         return token;
@@ -168,8 +171,14 @@ public class AuthManager {
 
     private void cleanupExpired() {
         long now = System.currentTimeMillis();
-        // Expired tokens
-        tokens.entrySet().removeIf(e -> now > e.getValue().expiry);
+        // Expired tokens — also close any lingering SSE channels
+        tokens.entrySet().removeIf(e -> {
+            if (now > e.getValue().expiry) {
+                cleanupTokenChannel(e.getKey());
+                return true;
+            }
+            return false;
+        });
         // Stale rate-limit entries (older than 2 windows)
         long cutoff = now - RATE_LIMIT_WINDOW_MS * 2;
         rateLimitMap.entrySet().removeIf(entry -> {
@@ -180,6 +189,13 @@ public class AuthManager {
                 return true;
             }
         });
+    }
+
+    private void cleanupTokenChannel(String token) {
+        Channel ch = tokenChannels.remove(token);
+        if (ch != null) {
+            ch.close();
+        }
     }
 
     private static class TokenInfo {
