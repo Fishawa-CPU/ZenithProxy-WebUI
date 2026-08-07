@@ -5,9 +5,12 @@ import com.zenith.webui.WebUIPlugin;
 import com.zenith.webui.auth.AuthManager;
 import com.zenith.webui.http.HttpHelper;
 import com.zenith.webui.queue.QueueParser;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
+import io.netty.util.CharsetUtil;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,9 +37,10 @@ public class DashboardHandler {
     private final AtomicLong lastBytesIn = new AtomicLong(0);
     private final AtomicLong lastBytesOut = new AtomicLong(0);
 
-    /** Full token validation only once per 30s instead of every 1s push cycle. */
-    private volatile long lastSSETokenValidation = 0;
-    private static final long SSE_TOKEN_VALIDATION_INTERVAL_MS = 30_000;
+    /** Tick counter drives validation scheduling — avoids System.currentTimeMillis() in the hot path. */
+    private final AtomicLong tickCounter = new AtomicLong(0);
+    /** Run full token validation every N heartbeat ticks (~30s). */
+    private static final long VALIDATION_TICK_INTERVAL = 30;
 
     public DashboardHandler(AuthManager authManager) {
         this.authManager = authManager;
@@ -66,10 +70,7 @@ public class DashboardHandler {
         streamExecutor.scheduleAtFixedRate(() -> {
             try {
                 if (WebUIPlugin.dashboardSseClients.isEmpty()) return;
-                validateSSETokens();
-                if (WebUIPlugin.dashboardSseClients.isEmpty()) return;
-                WebUIPlugin.broadcastSSE(WebUIPlugin.dashboardSseClients,
-                    HttpHelper.GSON.toJson(buildDashboardData()), false);
+                pushDashboardHeartbeat();
             } catch (Exception ignored) {}
         }, 0, 1, TimeUnit.SECONDS);
     }
@@ -82,30 +83,47 @@ public class DashboardHandler {
     }
 
     /**
-     * Validate SSE client tokens. Full validation (HashMap lookup per client) only runs
-     * every {@link #SSE_TOKEN_VALIDATION_INTERVAL_MS}. Between intervals, only inactive
-     * channels are purged — no token lookups.
+     * Single-traversal heartbeat: validate tokens + push dashboard data in one pass.
+     * Avoids the previous double iteration (validateSSETokens + broadcastSSE).
+     *
+     * Full token validation only every {@link #VALIDATION_TICK_INTERVAL} ticks (~30s);
+     * between intervals only dead channels are purged — zero token lookups.
      */
-    private void validateSSETokens() {
+    private void pushDashboardHeartbeat() {
         long now = System.currentTimeMillis();
-        boolean doFullValidation = (now - lastSSETokenValidation) >= SSE_TOKEN_VALIDATION_INTERVAL_MS;
+        String json = HttpHelper.GSON.toJson(buildDashboardData());
+        String frame = "data: " + json + "\n\n";
+        boolean doValidation = tickCounter.incrementAndGet() % VALIDATION_TICK_INTERVAL == 0;
 
-        if (doFullValidation) {
-            lastSSETokenValidation = now;
-            WebUIPlugin.sseClientTokens.entrySet().removeIf(entry -> {
-                Channel ch = entry.getKey();
-                if (!ch.isActive()) return true;
-                if (authManager.validateToken(entry.getValue()) == null) {
+        List<Channel> dead = new ArrayList<>(2);
+        for (Channel ch : WebUIPlugin.dashboardSseClients) {
+            if (!ch.isActive()) {
+                dead.add(ch);
+                WebUIPlugin.sseClientTokens.remove(ch);
+                continue;
+            }
+            if (doValidation) {
+                String token = WebUIPlugin.sseClientTokens.get(ch);
+                if (token == null || authManager.validateToken(token, now) == null) {
                     ch.close();
+                    dead.add(ch);
                     WebUIPlugin.sseClients.remove(ch);
-                    WebUIPlugin.dashboardSseClients.remove(ch);
-                    return true;
+                    WebUIPlugin.sseClientTokens.remove(ch);
+                    continue;
                 }
-                return false;
-            });
-        } else {
-            // Lightweight: only purge dead channels, skip token validation
-            WebUIPlugin.sseClientTokens.keySet().removeIf(ch -> !ch.isActive());
+            }
+            try {
+                ByteBuf buf = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
+                ch.writeAndFlush(new DefaultHttpContent(buf)).addListener(f -> {
+                    if (!f.isSuccess()) ch.close();
+                });
+            } catch (Exception e) {
+                ch.close();
+                dead.add(ch);
+            }
+        }
+        if (!dead.isEmpty()) {
+            WebUIPlugin.dashboardSseClients.removeAll(dead);
         }
     }
 

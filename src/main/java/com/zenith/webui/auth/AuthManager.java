@@ -8,6 +8,9 @@ import java.security.MessageDigest;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class AuthManager {
     private static final ComponentLogger LOG = ComponentLogger.logger("WebUI-Auth");
@@ -18,11 +21,23 @@ public class AuthManager {
     private final Map<String, TokenInfo> tokens = new ConcurrentHashMap<>();
     // Rate limit: key = "ip:minute_timestamp"
     private final Map<String, Integer> rateLimitMap = new ConcurrentHashMap<>();
-    private volatile long lastRateLimitCleanup = System.currentTimeMillis();
+    private final ScheduledExecutorService cleanupExecutor;
 
     public AuthManager(WebUIConfig.AuthConfig config) {
         this.config = config;
+        // Background cleanup: expired tokens + stale rate-limit entries every 5 minutes
+        cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "webui-auth-cleanup");
+            t.setDaemon(true);
+            return t;
+        });
+        cleanupExecutor.scheduleAtFixedRate(this::cleanupExpired, 5, 5, TimeUnit.MINUTES);
         LOG.info("Auth manager initialized, token expiry: {}ms", config.tokenExpiry);
+    }
+
+    /** Stop background cleanup (call on plugin unload). */
+    public void shutdown() {
+        cleanupExecutor.shutdownNow();
     }
 
     /**
@@ -32,9 +47,7 @@ public class AuthManager {
     public String authenticate(String username, String password, String clientIp) {
         if (username == null || password == null || clientIp == null) return null;
 
-        cleanupRateLimitIfNeeded();
-
-        // IP-based rate limiting
+        // IP-based rate limiting (stale entries cleaned by background task)
         String rateKey = clientIp + ":" + (System.currentTimeMillis() / RATE_LIMIT_WINDOW_MS);
         Integer attempts = rateLimitMap.get(rateKey);
         if (attempts != null && attempts >= MAX_ATTEMPTS_PER_MINUTE) {
@@ -60,12 +73,21 @@ public class AuthManager {
      * @return Username if valid, null otherwise
      */
     public String validateToken(String token) {
+        return validateToken(token, System.currentTimeMillis());
+    }
+
+    /**
+     * Validate token with externally-supplied timestamp — avoids repeated
+     * {@link System#currentTimeMillis()} calls when batch-validating many tokens
+     * (e.g. SSE heartbeat cycle).
+     */
+    public String validateToken(String token, long now) {
         if (token == null || token.isEmpty()) return null;
 
         TokenInfo tokenInfo = tokens.get(token);
         if (tokenInfo == null) return null;
 
-        if (System.currentTimeMillis() > tokenInfo.expiry) {
+        if (now > tokenInfo.expiry) {
             tokens.remove(token);
             return null;
         }
@@ -114,12 +136,12 @@ public class AuthManager {
         return token;
     }
 
-    private void cleanupRateLimitIfNeeded() {
+    private void cleanupExpired() {
         long now = System.currentTimeMillis();
-        if (now - lastRateLimitCleanup < RATE_LIMIT_WINDOW_MS * 2) return;
-        lastRateLimitCleanup = now;
+        // Expired tokens
+        tokens.entrySet().removeIf(e -> now > e.getValue().expiry);
+        // Stale rate-limit entries (older than 2 windows)
         long cutoff = now - RATE_LIMIT_WINDOW_MS * 2;
-        // Remove entries older than 2 windows by parsing minute timestamp from key
         rateLimitMap.entrySet().removeIf(entry -> {
             try {
                 long minuteTs = Long.parseLong(entry.getKey().substring(entry.getKey().lastIndexOf(':') + 1));

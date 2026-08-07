@@ -165,6 +165,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         dashboardHandler.stopStream();
         detachLogAppender();
         server.stop();
+        if (authManager != null) authManager.shutdown();
         instance = null;
     }
 
