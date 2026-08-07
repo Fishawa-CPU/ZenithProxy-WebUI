@@ -4,18 +4,27 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.zenith.webui.config.WebUIConfig;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
+import io.netty.util.AttributeKey;
 
 import java.nio.charset.StandardCharsets;
 
 /**
- * Handles authentication checks for incoming requests
+ * Handles authentication checks for incoming requests.
+ * Uses per-channel auth caching to avoid redundant token validation
+ * on HTTP keep-alive connections.
  */
 public class AuthHandler {
     private final AuthManager authManager;
     private final WebUIConfig config;
+
+    /** Per-channel auth cache: avoids re-validating token on every request over the same TCP connection. */
+    private static final AttributeKey<Long> AUTH_CACHE_KEY = AttributeKey.valueOf("webui_auth_ts");
+    /** Re-validate token at most once per cache window (30s). Zero cost for bursts of requests. */
+    private static final long AUTH_CACHE_MS = 30_000;
 
     // Paths that don't require authentication
     private static final String[] PUBLIC_PATHS = {
@@ -32,10 +41,10 @@ public class AuthHandler {
     }
 
     /**
-     * Check if request is authenticated
+     * Check if request is authenticated, with per-channel caching.
      * @return true if authenticated or public path, false otherwise
      */
-    public boolean checkAuth(FullHttpRequest request) {
+    public boolean checkAuth(ChannelHandlerContext ctx, FullHttpRequest request) {
         // If auth is disabled globally, allow all requests
         if (config != null && !config.auth.enabled) {
             return true;
@@ -57,12 +66,29 @@ public class AuthHandler {
             return true;
         }
 
+        // Per-channel auth cache: skip validation if recently authenticated on this TCP channel
+        Channel ch = ctx.channel();
+        Long cachedTs = ch.attr(AUTH_CACHE_KEY).get();
+        long now = System.currentTimeMillis();
+        if (cachedTs != null && (now - cachedTs) < AUTH_CACHE_MS) {
+            return true;
+        }
+
         // Extract token from cookie or header
         String token = extractToken(request);
-        if (token == null) return false;
+        if (token == null) {
+            ch.attr(AUTH_CACHE_KEY).set(null);
+            return false;
+        }
 
         // Validate token
-        return authManager.validateToken(token) != null;
+        String username = authManager.validateToken(token);
+        if (username != null) {
+            ch.attr(AUTH_CACHE_KEY).set(now);
+            return true;
+        }
+        ch.attr(AUTH_CACHE_KEY).set(null);
+        return false;
     }
 
     /**

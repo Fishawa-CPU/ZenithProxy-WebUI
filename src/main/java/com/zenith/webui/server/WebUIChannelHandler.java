@@ -70,8 +70,8 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
             return;
         }
 
-        // Check authentication for protected resources
-        if (!authHandler.checkAuth(req)) {
+        // Check authentication for protected resources (with per-channel caching)
+        if (!authHandler.checkAuth(ctx, req)) {
             if (path.startsWith("/api/")) {
                 AuthHandler.sendUnauthorized(ctx, "Authentication required");
                 return;

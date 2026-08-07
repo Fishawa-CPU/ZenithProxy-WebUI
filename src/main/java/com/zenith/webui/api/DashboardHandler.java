@@ -34,6 +34,10 @@ public class DashboardHandler {
     private final AtomicLong lastBytesIn = new AtomicLong(0);
     private final AtomicLong lastBytesOut = new AtomicLong(0);
 
+    /** Full token validation only once per 30s instead of every 1s push cycle. */
+    private volatile long lastSSETokenValidation = 0;
+    private static final long SSE_TOKEN_VALIDATION_INTERVAL_MS = 30_000;
+
     public DashboardHandler(AuthManager authManager) {
         this.authManager = authManager;
     }
@@ -77,19 +81,32 @@ public class DashboardHandler {
         }
     }
 
+    /**
+     * Validate SSE client tokens. Full validation (HashMap lookup per client) only runs
+     * every {@link #SSE_TOKEN_VALIDATION_INTERVAL_MS}. Between intervals, only inactive
+     * channels are purged — no token lookups.
+     */
     private void validateSSETokens() {
-        WebUIPlugin.sseClientTokens.entrySet().removeIf(entry -> {
-            Channel ch = entry.getKey();
-            if (!ch.isActive()) return true;
-            String username = authManager.validateToken(entry.getValue());
-            if (username == null) {
-                ch.close();
-                WebUIPlugin.sseClients.remove(ch);
-                WebUIPlugin.dashboardSseClients.remove(ch);
-                return true;
-            }
-            return false;
-        });
+        long now = System.currentTimeMillis();
+        boolean doFullValidation = (now - lastSSETokenValidation) >= SSE_TOKEN_VALIDATION_INTERVAL_MS;
+
+        if (doFullValidation) {
+            lastSSETokenValidation = now;
+            WebUIPlugin.sseClientTokens.entrySet().removeIf(entry -> {
+                Channel ch = entry.getKey();
+                if (!ch.isActive()) return true;
+                if (authManager.validateToken(entry.getValue()) == null) {
+                    ch.close();
+                    WebUIPlugin.sseClients.remove(ch);
+                    WebUIPlugin.dashboardSseClients.remove(ch);
+                    return true;
+                }
+                return false;
+            });
+        } else {
+            // Lightweight: only purge dead channels, skip token validation
+            WebUIPlugin.sseClientTokens.keySet().removeIf(ch -> !ch.isActive());
+        }
     }
 
     private Map<String, Object> buildDashboardData() {

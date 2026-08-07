@@ -55,7 +55,8 @@ public class AuthManager {
     }
 
     /**
-     * Validate token
+     * Validate token. Called infrequently thanks to per-channel auth caching
+     * (see {@link AuthHandler#AUTH_CACHE_MS}) and batched SSE validation.
      * @return Username if valid, null otherwise
      */
     public String validateToken(String token) {
