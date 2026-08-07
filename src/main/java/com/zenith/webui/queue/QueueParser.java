@@ -5,8 +5,6 @@ import com.zenith.network.codec.ClientEventLoopPacketHandler;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
 
-import java.util.Optional;
-
 import static com.zenith.Globals.*;
 
 /**
@@ -47,11 +45,12 @@ public class QueueParser implements ClientEventLoopPacketHandler<ClientboundSetS
     }
 
     private void parse3cQueuePos(ClientboundSetSubtitleTextPacket packet) {
-        String text = Optional.of(packet)
-            .map(p -> com.zenith.util.ComponentSerializer.serializePlain(p.getText()))
-            .orElse("");
-
-        if (text.isEmpty()) {
+        if (packet == null) {
+            positionInQueue = -1;
+            return;
+        }
+        String text = com.zenith.util.ComponentSerializer.serializePlain(packet.getText());
+        if (text == null || text.isEmpty()) {
             positionInQueue = -1;
             return;
         }

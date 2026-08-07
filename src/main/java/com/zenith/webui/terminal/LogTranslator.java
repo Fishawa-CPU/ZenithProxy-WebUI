@@ -4,16 +4,23 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Static utility for translating common English log messages to Chinese.
- * Keys are sorted by length descending to avoid partial-match issues.
+ * Uses a single pre-compiled regex for one-pass translation instead of
+ * iterating with {@link String#replace} (which internally compiles a
+ * Pattern each time).
+ *
+ * Keys are sorted by length descending so longer matches take priority.
  */
 public final class LogTranslator {
     private LogTranslator() {}
 
     private static final LinkedHashMap<String, String> LOG_TRANSLATIONS = new LinkedHashMap<>();
     private static final List<Map.Entry<String, String>> SORTED_TRANSLATIONS;
+    private static final Pattern TRANSLATION_PATTERN;
 
     static {
         LOG_TRANSLATIONS.put("Connecting to server", "正在连接服务器");
@@ -59,16 +66,23 @@ public final class LogTranslator {
 
         SORTED_TRANSLATIONS = new ArrayList<>(LOG_TRANSLATIONS.entrySet());
         SORTED_TRANSLATIONS.sort((a, b) -> Integer.compare(b.getKey().length(), a.getKey().length()));
+
+        // Build a single alternation regex: (longestKey|secondLongest|...)
+        StringBuilder sb = new StringBuilder();
+        for (var entry : SORTED_TRANSLATIONS) {
+            if (sb.length() > 0) sb.append('|');
+            sb.append(Pattern.quote(entry.getKey()));
+        }
+        TRANSLATION_PATTERN = Pattern.compile(sb.toString());
     }
 
+    /**
+     * One-pass translation: single regex scan replaces all matching substrings.
+     * Avoids the 35x Pattern.compile + full-scan overhead of the old per-key loop.
+     */
     public static String translate(String message) {
         if (message == null || message.isEmpty()) return message;
-        for (var entry : SORTED_TRANSLATIONS) {
-            String key = entry.getKey();
-            if (message.contains(key)) {
-                message = message.replace(key, entry.getValue());
-            }
-        }
-        return message;
+        Matcher m = TRANSLATION_PATTERN.matcher(message);
+        return m.replaceAll(match -> LOG_TRANSLATIONS.get(match.group()));
     }
 }

@@ -12,10 +12,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Serves static files from classpath and plugin directory with caching.
+ * Both classpath resources and filesystem files share the same cache
+ * to avoid repeated reads.
  */
 public class StaticFileHandler {
     private static final int FILE_CACHE_MAX_SIZE = 128;
     private static final ConcurrentHashMap<Path, byte[]> fileCache = new ConcurrentHashMap<>();
+    /** Cache classpath resources keyed by path (e.g. "index.html"). */
+    private static final ConcurrentHashMap<String, byte[]> resourceCache = new ConcurrentHashMap<>();
     /** Sentinel for files that don't exist, to avoid repeated I/O. */
     private static final byte[] NOT_FOUND = new byte[0];
 
@@ -33,7 +37,7 @@ public class StaticFileHandler {
             return;
         }
 
-        byte[] content = loadResource(path);
+        byte[] content = loadResourceCached(path);
         if (content == null) {
             content = loadFile(webDir.resolve(path.substring(1)));
         }
@@ -42,7 +46,7 @@ public class StaticFileHandler {
             HttpHelper.sendBytes(ctx, content, HttpHelper.getContentType(path));
         } else {
             // SPA fallback
-            content = loadResource("/index.html");
+            content = loadResourceCached("/index.html");
             if (content == null) {
                 content = loadFile(webDir.resolve("index.html"));
             }
@@ -54,8 +58,20 @@ public class StaticFileHandler {
         }
     }
 
+    /** Cached wrapper around classpath resource loading. */
+    private byte[] loadResourceCached(String path) {
+        String cacheKey = path.startsWith("/") ? path.substring(1) : path;
+        byte[] cached = resourceCache.get(cacheKey);
+        if (cached != null) {
+            return cached == NOT_FOUND ? null : cached;
+        }
+        byte[] content = loadResource(cacheKey);
+        resourceCache.put(cacheKey, content != null ? content : NOT_FOUND);
+        return content;
+    }
+
     private byte[] loadResource(String path) {
-        if (path.startsWith("/")) path = path.substring(1);
+        // path already normalized (no leading /) by loadResourceCached
         try (InputStream is = getClass().getResourceAsStream("/web/" + path)) {
             if (is == null) return null;
             return is.readAllBytes();
