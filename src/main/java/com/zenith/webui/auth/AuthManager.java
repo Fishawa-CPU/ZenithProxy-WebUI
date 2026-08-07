@@ -1,6 +1,7 @@
 package com.zenith.webui.auth;
 
 import com.zenith.webui.config.WebUIConfig;
+import io.netty.channel.Channel;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 import java.nio.charset.StandardCharsets;
@@ -21,6 +22,8 @@ public class AuthManager {
     private final Map<String, TokenInfo> tokens = new ConcurrentHashMap<>();
     // Rate limit: key = "ip:minute_timestamp"
     private final Map<String, Integer> rateLimitMap = new ConcurrentHashMap<>();
+    /** SSE channels keyed by token — for event-driven disconnect on logout/password-change. */
+    private final Map<String, Channel> tokenChannels = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanupExecutor;
 
     public AuthManager(WebUIConfig.AuthConfig config) {
@@ -96,20 +99,48 @@ public class AuthManager {
     }
 
     /**
-     * Invalidate a specific token (logout)
+     * Register an SSE channel for a token. The channel will be closed
+     * automatically when the token is invalidated (logout / password change).
+     */
+    public void registerChannel(String token, Channel channel) {
+        if (token != null && channel != null) {
+            tokenChannels.put(token, channel);
+        }
+    }
+
+    /** Unregister an SSE channel (called on channelInactive). */
+    public void unregisterChannel(Channel channel) {
+        if (channel == null) return;
+        tokenChannels.values().removeIf(ch -> ch == channel);
+    }
+
+    /**
+     * Invalidate a specific token (logout). Also closes the associated SSE channel.
      */
     public void invalidateToken(String token) {
-        if (token != null) {
-            tokens.remove(token);
+        if (token == null) return;
+        tokens.remove(token);
+        Channel ch = tokenChannels.remove(token);
+        if (ch != null) {
+            ch.close();
+            LOG.info("SSE channel closed for invalidated token");
         }
     }
 
     /**
-     * Invalidate all tokens for a given username (e.g., on password change)
+     * Invalidate all tokens for a given username (e.g., on password change).
+     * Also closes all associated SSE channels.
      */
     public void invalidateAllTokensForUser(String username) {
         if (username == null) return;
-        tokens.entrySet().removeIf(e -> username.equals(e.getValue().username));
+        tokens.entrySet().removeIf(e -> {
+            if (username.equals(e.getValue().username)) {
+                Channel ch = tokenChannels.remove(e.getKey());
+                if (ch != null) ch.close();
+                return true;
+            }
+            return false;
+        });
         LOG.info("All tokens invalidated for user: {}", username);
     }
 

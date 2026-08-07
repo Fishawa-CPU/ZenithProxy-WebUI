@@ -2,7 +2,6 @@ package com.zenith.webui.api;
 
 import com.zenith.Proxy;
 import com.zenith.webui.WebUIPlugin;
-import com.zenith.webui.auth.AuthManager;
 import com.zenith.webui.http.HttpHelper;
 import com.zenith.webui.queue.QueueParser;
 import io.netty.buffer.ByteBuf;
@@ -30,20 +29,13 @@ import static com.zenith.Globals.*;
  * Builds aggregated proxy status data and pushes it via SSE.
  */
 public class DashboardHandler {
-    private final AuthManager authManager;
     private ScheduledExecutorService streamExecutor;
 
     private final AtomicLong lastNetTime = new AtomicLong(0);
     private final AtomicLong lastBytesIn = new AtomicLong(0);
     private final AtomicLong lastBytesOut = new AtomicLong(0);
 
-    /** Tick counter drives validation scheduling — avoids System.currentTimeMillis() in the hot path. */
-    private final AtomicLong tickCounter = new AtomicLong(0);
-    /** Run full token validation every N heartbeat ticks (~30s). */
-    private static final long VALIDATION_TICK_INTERVAL = 30;
-
-    public DashboardHandler(AuthManager authManager) {
-        this.authManager = authManager;
+    public DashboardHandler() {
     }
 
     public void handleDashboard(ChannelHandlerContext ctx) {
@@ -83,34 +75,19 @@ public class DashboardHandler {
     }
 
     /**
-     * Single-traversal heartbeat: validate tokens + push dashboard data in one pass.
-     * Avoids the previous double iteration (validateSSETokens + broadcastSSE).
-     *
-     * Full token validation only every {@link #VALIDATION_TICK_INTERVAL} ticks (~30s);
-     * between intervals only dead channels are purged — zero token lookups.
+     * Pure heartbeat push — no token validation. Token validity is enforced
+     * once at SSE connection setup and event-driven on logout/password-change
+     * (see {@link com.zenith.webui.auth.AuthManager#invalidateToken}).
      */
     private void pushDashboardHeartbeat() {
-        long now = System.currentTimeMillis();
         String json = HttpHelper.GSON.toJson(buildDashboardData());
         String frame = "data: " + json + "\n\n";
-        boolean doValidation = tickCounter.incrementAndGet() % VALIDATION_TICK_INTERVAL == 0;
 
         List<Channel> dead = new ArrayList<>(2);
         for (Channel ch : WebUIPlugin.dashboardSseClients) {
             if (!ch.isActive()) {
                 dead.add(ch);
-                WebUIPlugin.sseClientTokens.remove(ch);
                 continue;
-            }
-            if (doValidation) {
-                String token = WebUIPlugin.sseClientTokens.get(ch);
-                if (token == null || authManager.validateToken(token, now) == null) {
-                    ch.close();
-                    dead.add(ch);
-                    WebUIPlugin.sseClients.remove(ch);
-                    WebUIPlugin.sseClientTokens.remove(ch);
-                    continue;
-                }
             }
             try {
                 ByteBuf buf = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);

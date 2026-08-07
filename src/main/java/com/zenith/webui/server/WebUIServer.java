@@ -77,7 +77,6 @@ public class WebUIServer {
             ch.close();
         }
         WebUIPlugin.dashboardSseClients.clear();
-        WebUIPlugin.sseClientTokens.clear();
 
         cleanup();
     }

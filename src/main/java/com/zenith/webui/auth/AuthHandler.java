@@ -141,6 +141,18 @@ public class AuthHandler {
         return null;
     }
 
+    // ── SSE channel registration (event-driven disconnect on logout/password-change) ──
+
+    /** Register an SSE channel for a token so it can be closed when the token is revoked. */
+    public void registerSseChannel(String token, Channel channel) {
+        authManager.registerChannel(token, channel);
+    }
+
+    /** Unregister an SSE channel (called on channelInactive). */
+    public void unregisterSseChannel(Channel channel) {
+        authManager.unregisterChannel(channel);
+    }
+
     /**
      * Send unauthorized response (safe from JSON injection)
      */

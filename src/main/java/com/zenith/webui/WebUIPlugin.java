@@ -39,7 +39,6 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -82,7 +81,6 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
     public static final List<Channel> sseClients = new CopyOnWriteArrayList<>();
     public static final List<Channel> dashboardSseClients = new CopyOnWriteArrayList<>();
-    public static final Map<Channel, String> sseClientTokens = new ConcurrentHashMap<>();
 
     // ── Component graph ───────────────────────────────────────
     private ConfigManager configManager;
@@ -120,7 +118,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         authController = new AuthController(authManager);
 
         // Handlers
-        dashboardHandler = new DashboardHandler(authManager);
+        dashboardHandler = new DashboardHandler();
         WebUIChannelHandler channelHandler = new WebUIChannelHandler(
             authHandler, authController,
             new CommandHandler(),
@@ -286,7 +284,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         o.addProperty("logger", logger);
         o.addProperty("message", message);
         o.addProperty("timestamp", System.currentTimeMillis());
-        broadcastSSE(sseClients, HttpHelper.GSON.toJson(o), true);
+        broadcastSSE(sseClients, HttpHelper.GSON.toJson(o));
     }
 
     /** Push a title packet to log-stream SSE clients. Called by {@link TitlePacketHandler}. */
@@ -294,18 +292,16 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         com.google.gson.JsonObject o = new com.google.gson.JsonObject();
         o.addProperty("type", "title");
         o.addProperty("text", text);
-        broadcastSSE(sseClients, HttpHelper.GSON.toJson(o), true);
+        broadcastSSE(sseClients, HttpHelper.GSON.toJson(o));
     }
 
     /**
      * Write an SSE data frame to every active channel in {@code clients}.
-     * @param isLogStream if true, also remove dead channels from {@link #sseClientTokens}.
      */
-    public static void broadcastSSE(List<Channel> clients, String json, boolean isLogStream) {
+    public static void broadcastSSE(List<Channel> clients, String json) {
         String frame = "data: " + json + "\n\n";
         clients.removeIf(ch -> {
             if (!ch.isActive()) {
-                if (isLogStream) sseClientTokens.remove(ch);
                 return true;
             }
             try {

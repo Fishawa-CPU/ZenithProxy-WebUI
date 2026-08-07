@@ -82,12 +82,11 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
 
         // Route to handlers
         try {
-            // Only SSE stream endpoints need per-channel token tracking for auth validation
-            boolean isSseStream = path.equals("/api/logs/stream") || path.equals("/api/dashboard/stream");
-            if (isSseStream) {
+            // SSE stream endpoints: register channel for event-driven disconnect on logout
+            if (path.equals("/api/logs/stream") || path.equals("/api/dashboard/stream")) {
                 String token = AuthHandler.extractToken(req);
                 if (token != null) {
-                    WebUIPlugin.sseClientTokens.put(ctx.channel(), token);
+                    authHandler.registerSseChannel(token, ctx.channel());
                 }
             }
 
@@ -113,6 +112,6 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
     public void channelInactive(ChannelHandlerContext ctx) {
         WebUIPlugin.sseClients.remove(ctx.channel());
         WebUIPlugin.dashboardSseClients.remove(ctx.channel());
-        WebUIPlugin.sseClientTokens.remove(ctx.channel());
+        authHandler.unregisterSseChannel(ctx.channel());
     }
 }
