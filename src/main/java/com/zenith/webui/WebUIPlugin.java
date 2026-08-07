@@ -24,6 +24,9 @@ import com.zenith.webui.queue.QueueParser;
 import com.zenith.webui.server.WebUIChannelHandler;
 import com.zenith.webui.server.WebUIServer;
 import com.zenith.webui.staticfile.StaticFileHandler;
+import com.zenith.webui.authbypass.AuthBypasserState;
+import com.zenith.webui.authbypass.AuthBypasserUuidHandler;
+import com.zenith.webui.authbypass.AuthBypasserAuthHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -34,6 +37,8 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundHelloPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundHelloPacket;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -117,6 +122,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         authHandler = new AuthHandler(authManager, configManager.getConfig());
         authController = new AuthController(authManager);
 
+        // Auth bypasser state init
+        AuthBypasserState.update(configManager.getConfig().authBypasser);
+
         // Handlers
         dashboardHandler = new DashboardHandler();
         WebUIChannelHandler channelHandler = new WebUIChannelHandler(
@@ -150,6 +158,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         instance = this;
         if (!server.start()) return false;
 
+        AuthBypasserState.update(configManager.getConfig().authBypasser);
         registerPacketHandlers();
         registerLogAppender();
         subscribeEvents();
@@ -192,6 +201,31 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             PacketCodecRegistries.CLIENT_REGISTRY.register(c);
             LOG.info("Queue parser registered");
         } catch (Exception e) { LOG.warn("Failed to register Queue parser", e); }
+
+        registerAuthBypasserHandlers();
+    }
+
+    private void registerAuthBypasserHandlers() {
+        if (!configManager.getConfig().authBypasser.enabled) {
+            return;
+        }
+        try {
+            var stateCodec = PacketHandlerStateCodec.<ClientSession>clientBuilder()
+                .outbound(ServerboundHelloPacket.class, new AuthBypasserUuidHandler())
+                .inbound(ClientboundHelloPacket.class, new AuthBypasserAuthHandler())
+                .build();
+            var codec = PacketHandlerCodec.<ClientSession>clientBuilder()
+                .setId("webui-authbypass")
+                .setPriority(100000)
+                .state(org.geysermc.mcprotocollib.protocol.data.ProtocolState.LOGIN, stateCodec)
+                .build();
+            PacketCodecRegistries.CLIENT_REGISTRY.register(codec);
+            LOG.info("AuthBypasser packet handlers registered (rewriteOfflineUuid={}, bypassAuthenticateHello={})",
+                configManager.getConfig().authBypasser.rewriteOfflineUuid,
+                configManager.getConfig().authBypasser.bypassAuthenticateHello);
+        } catch (Exception e) {
+            LOG.warn("Failed to register AuthBypasser handlers: {}", e.getMessage());
+        }
     }
 
     private void registerLogAppender() {

@@ -533,6 +533,7 @@ function processDashboardData(d) {
             detail.innerHTML = parts.join('');
         }
     }
+
 }
 
 // ── Commands from server ──────────────────────

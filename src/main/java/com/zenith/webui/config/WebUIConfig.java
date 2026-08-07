@@ -16,4 +16,15 @@ public class WebUIConfig {
 
         public AuthConfig() {}
     }
+
+    // Auth bypasser settings — fixes offline login for hybrid-auth servers (e.g. 3C network)
+    public AuthBypasserConfig authBypasser = new AuthBypasserConfig();
+
+    public static class AuthBypasserConfig {
+        public boolean enabled = true;
+        public boolean rewriteOfflineUuid = true;
+        public boolean bypassAuthenticateHello = true;
+
+        public AuthBypasserConfig() {}
+    }
 }
