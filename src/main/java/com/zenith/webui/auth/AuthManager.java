@@ -81,8 +81,7 @@ public class AuthManager {
 
     /**
      * Validate token with externally-supplied timestamp — avoids repeated
-     * {@link System#currentTimeMillis()} calls when batch-validating many tokens
-     * (e.g. SSE heartbeat cycle).
+     * {@link System#currentTimeMillis()} calls when checking multiple tokens.
      */
     public String validateToken(String token, long now) {
         if (token == null || token.isEmpty()) return null;

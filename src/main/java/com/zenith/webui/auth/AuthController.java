@@ -99,13 +99,10 @@ public class AuthController {
         return "unknown";
     }
 
-    private String buildCookie(String token, int maxAge) {
-        // HttpOnly prevents JS access to token
-        // SameSite=Lax prevents CSRF while allowing navigation from other sites
-        // Note: For HTTPS deployments, add "; Secure" flag
+    private static String buildCookie(String token, int maxAge) {
+        // HttpOnly prevents JS access; SameSite=Lax prevents CSRF
         if (maxAge > 0) {
-            return String.format("webui_token=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d",
-                token, maxAge);
+            return "webui_token=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge;
         }
         return "webui_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0";
     }

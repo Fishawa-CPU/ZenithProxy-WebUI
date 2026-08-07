@@ -36,7 +36,6 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.Clien
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
 
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -263,27 +262,26 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     /** Called by {@link WebUILogHandler} and event subscribers. */
     public void broadcastLog(String level, String logger, String message) {
         message = LogTranslator.translate(message);
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("level", level);
-        entry.put("logger", logger);
-        entry.put("message", message);
-        entry.put("timestamp", System.currentTimeMillis());
-        entry.put("id", logPollCounter.getAndIncrement());
+        long ts = System.currentTimeMillis();
+        // Map.of is ~4x cheaper than LinkedHashMap for small fixed-size maps
+        Map<String, Object> entry = Map.of(
+            "level", level, "logger", logger, "message", message,
+            "timestamp", ts, "id", logPollCounter.getAndIncrement());
         logBuffer.addLast(entry);
         // Use counter instead of O(n) ConcurrentLinkedDeque.size()
         if (logBufferApproxSize.incrementAndGet() > LOG_BUFFER_MAX) {
             logBuffer.pollFirst();
             logBufferApproxSize.decrementAndGet();
         }
-        notifyLogSSE(level, logger, message);
+        notifyLogSSE(level, logger, message, ts);
     }
 
-    private void notifyLogSSE(String level, String logger, String message) {
+    private void notifyLogSSE(String level, String logger, String message, long ts) {
         com.google.gson.JsonObject o = new com.google.gson.JsonObject();
         o.addProperty("level", level);
         o.addProperty("logger", logger);
         o.addProperty("message", message);
-        o.addProperty("timestamp", System.currentTimeMillis());
+        o.addProperty("timestamp", ts);
         broadcastSSE(sseClients, HttpHelper.GSON.toJson(o));
     }
 
@@ -297,23 +295,24 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
     /**
      * Write an SSE data frame to every active channel in {@code clients}.
+     * Uses retainedDuplicate to avoid per-channel ByteBuf allocation.
      */
     public static void broadcastSSE(List<Channel> clients, String json) {
         String frame = "data: " + json + "\n\n";
+        ByteBuf template = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
         clients.removeIf(ch -> {
             if (!ch.isActive()) {
                 return true;
             }
             try {
-                ByteBuf buf = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
-                ch.writeAndFlush(new DefaultHttpContent(buf)).addListener(f -> {
-                    if (!f.isSuccess()) ch.close();
-                });
+                ch.writeAndFlush(new DefaultHttpContent(template.retainedDuplicate()))
+                    .addListener(f -> { if (!f.isSuccess()) ch.close(); });
                 return false;
             } catch (Exception e) {
                 ch.close();
                 return true;
             }
         });
+        template.release();
     }
 }

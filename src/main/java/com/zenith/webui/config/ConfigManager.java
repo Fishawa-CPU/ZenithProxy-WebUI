@@ -107,13 +107,17 @@ public class ConfigManager {
         }
     }
 
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
+
     private static String generateRandomPassword() {
-        byte[] bytes = new byte[16];
+        byte[] bytes = new byte[8];
         new SecureRandom().nextBytes(bytes);
-        StringBuilder sb = new StringBuilder(32);
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
+        char[] chars = new char[16];
+        for (int i = 0; i < 8; i++) {
+            int b = bytes[i] & 0xFF;
+            chars[i * 2] = HEX[b >>> 4];
+            chars[i * 2 + 1] = HEX[b & 0x0F];
         }
-        return sb.toString().substring(0, 16);
+        return new String(chars);
     }
 }
