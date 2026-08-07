@@ -116,7 +116,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
         // Auth
         authManager = new AuthManager(configManager.getConfig().auth);
-        authHandler = new AuthHandler(authManager);
+        authHandler = new AuthHandler(authManager, configManager.getConfig());
         authController = new AuthController(authManager);
 
         // Handlers

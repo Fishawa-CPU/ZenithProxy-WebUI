@@ -8,12 +8,8 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
-
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Manages the Netty HTTP server lifecycle.
@@ -25,7 +21,6 @@ public class WebUIServer {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
-    private ExecutorService blockingExecutor;
 
     private final int port;
     private final WebUIChannelHandler channelHandler;
@@ -55,7 +50,6 @@ public class WebUIServer {
                      p.addLast(new HttpServerCodec());
                      p.addLast(new HttpObjectAggregator(65536));
                      p.addLast(new ChunkedWriteHandler());
-                     p.addLast(new WebSocketServerProtocolHandler("/ws"));
                      p.addLast(channelHandler);
                  }
              })
@@ -65,13 +59,6 @@ public class WebUIServer {
 
             serverChannel = b.bind(port).sync().channel();
             LOG.info("Netty NIO server started on port {}", port);
-
-            blockingExecutor = Executors.newFixedThreadPool(2, r -> {
-                Thread t = new Thread(r, "webui-blocking");
-                t.setDaemon(true);
-                return t;
-            });
-
             return true;
         } catch (Exception e) {
             LOG.error("Failed to start WebUI", e);
@@ -92,10 +79,6 @@ public class WebUIServer {
         WebUIPlugin.dashboardSseClients.clear();
         WebUIPlugin.sseClientTokens.clear();
 
-        if (blockingExecutor != null) {
-            blockingExecutor.shutdownNow();
-            blockingExecutor = null;
-        }
         cleanup();
     }
 
@@ -104,13 +87,29 @@ public class WebUIServer {
     }
 
     private void cleanupStaleResources() {
-        if (bossGroup != null) { bossGroup.shutdownGracefully(); bossGroup = null; }
-        if (workerGroup != null) { workerGroup.shutdownGracefully(); workerGroup = null; }
+        if (bossGroup != null) {
+            bossGroup.shutdownGracefully();
+            try { bossGroup.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
+            bossGroup = null;
+        }
+        if (workerGroup != null) {
+            workerGroup.shutdownGracefully();
+            try { workerGroup.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
+            workerGroup = null;
+        }
     }
 
     private void cleanup() {
         if (serverChannel != null) { serverChannel.close(); serverChannel = null; }
-        if (workerGroup != null) { workerGroup.shutdownGracefully(); workerGroup = null; }
-        if (bossGroup != null) { bossGroup.shutdownGracefully(); bossGroup = null; }
+        if (workerGroup != null) {
+            workerGroup.shutdownGracefully();
+            try { workerGroup.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
+            workerGroup = null;
+        }
+        if (bossGroup != null) {
+            bossGroup.shutdownGracefully();
+            try { bossGroup.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
+            bossGroup = null;
+        }
     }
 }

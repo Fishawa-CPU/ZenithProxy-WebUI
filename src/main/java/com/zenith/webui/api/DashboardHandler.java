@@ -61,8 +61,7 @@ public class DashboardHandler {
         });
         streamExecutor.scheduleAtFixedRate(() -> {
             try {
-                if (WebUIPlugin.dashboardSseClients.isEmpty()
-                    && WebUIPlugin.sseClients.isEmpty()) return;
+                if (WebUIPlugin.dashboardSseClients.isEmpty()) return;
                 validateSSETokens();
                 if (WebUIPlugin.dashboardSseClients.isEmpty()) return;
                 WebUIPlugin.broadcastSSE(WebUIPlugin.dashboardSseClients,
@@ -135,6 +134,7 @@ public class DashboardHandler {
             long now = System.currentTimeMillis();
             long totalBytesIn = 0, totalBytesOut = 0;
             try {
+                // /proc/net/dev is a procfs pseudo-file backed by kernel memory — no disk I/O
                 List<String> lines = Files.readAllLines(Path.of("/proc/net/dev"));
                 for (String line : lines) {
                     line = line.trim();

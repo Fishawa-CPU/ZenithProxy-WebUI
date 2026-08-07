@@ -1124,3 +1124,106 @@ body {
     color: var(--ctp-overlay1);
     font-size: 0.88rem;
 }
+
+/* ── Login Page ─────────────────────────── */
+.login-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background-color: var(--background-color);
+}
+
+.login-container {
+    width: 100%;
+    max-width: 380px;
+    background-color: var(--ctp-surface0);
+    padding: 32px 28px;
+}
+
+.login-logo {
+    text-align: center;
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--ctp-surface1);
+}
+
+.login-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 14px;
+    border-radius: 8px;
+    background-color: rgba(198, 160, 246, 0.15);
+    color: var(--ctp-mauve);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-logo h1 {
+    font-size: 1.4rem;
+    color: var(--ctp-lavender);
+    font-weight: 700;
+}
+
+.login-logo h1 .en {
+    font-size: 0.7rem;
+    color: var(--ctp-overlay0);
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.login-logo p {
+    color: var(--ctp-overlay0);
+    font-size: 0.82rem;
+    margin-top: 6px;
+}
+
+.login-form .form-group {
+    margin-bottom: 16px;
+}
+
+.login-btn {
+    width: 100%;
+    padding: 10px 16px;
+    font-size: 0.95rem;
+    margin-top: 4px;
+}
+
+.login-btn .en {
+    font-size: 0.7rem;
+    opacity: 0.8;
+    margin-left: 6px;
+    font-weight: 400;
+}
+
+.login-error {
+    display: none;
+    background-color: rgba(237, 135, 150, 0.1);
+    border: 1px solid var(--ctp-red);
+    color: var(--ctp-red);
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 0.82rem;
+}
+
+.login-error.show {
+    display: block;
+}
+
+.login-footer {
+    text-align: center;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--ctp-surface1);
+    color: var(--ctp-overlay0);
+    font-size: 0.72rem;
+}
+
+@media (max-width: 480px) {
+    .login-container {
+        padding: 24px 20px;
+    }
+}

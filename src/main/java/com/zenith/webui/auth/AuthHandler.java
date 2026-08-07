@@ -2,6 +2,7 @@ package com.zenith.webui.auth;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.zenith.webui.config.WebUIConfig;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
  */
 public class AuthHandler {
     private final AuthManager authManager;
+    private final WebUIConfig config;
 
     // Paths that don't require authentication
     private static final String[] PUBLIC_PATHS = {
@@ -24,8 +26,9 @@ public class AuthHandler {
         "/favicon.ico"
     };
 
-    public AuthHandler(AuthManager authManager) {
+    public AuthHandler(AuthManager authManager, WebUIConfig config) {
         this.authManager = authManager;
+        this.config = config;
     }
 
     /**
@@ -33,6 +36,11 @@ public class AuthHandler {
      * @return true if authenticated or public path, false otherwise
      */
     public boolean checkAuth(FullHttpRequest request) {
+        // If auth is disabled globally, allow all requests
+        if (config != null && !config.auth.enabled) {
+            return true;
+        }
+
         String path = request.uri();
         // Strip query string for path matching
         if (path.contains("?")) path = path.substring(0, path.indexOf('?'));
@@ -81,7 +89,11 @@ public class AuthHandler {
         return authManager.validateToken(token);
     }
 
-    private String extractToken(FullHttpRequest request) {
+    /**
+     * Extract authentication token from request (cookie or Bearer header).
+     * Shared utility — also used by {@link AuthController} and {@link com.zenith.webui.server.WebUIChannelHandler}.
+     */
+    public static String extractToken(FullHttpRequest request) {
         // Try Authorization header first
         String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
         if (authHeader != null && authHeader.startsWith("Bearer ")) {

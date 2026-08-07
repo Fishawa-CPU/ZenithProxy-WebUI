@@ -85,7 +85,7 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
             // Only SSE stream endpoints need per-channel token tracking for auth validation
             boolean isSseStream = path.equals("/api/logs/stream") || path.equals("/api/dashboard/stream");
             if (isSseStream) {
-                String token = extractToken(req);
+                String token = AuthHandler.extractToken(req);
                 if (token != null) {
                     WebUIPlugin.sseClientTokens.put(ctx.channel(), token);
                 }
@@ -114,25 +114,5 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
         WebUIPlugin.sseClients.remove(ctx.channel());
         WebUIPlugin.dashboardSseClients.remove(ctx.channel());
         WebUIPlugin.sseClientTokens.remove(ctx.channel());
-    }
-
-    private static String extractToken(FullHttpRequest request) {
-        // Try Authorization header first
-        String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            return authHeader.substring(7);
-        }
-        // Try cookie
-        String cookieHeader = request.headers().get(HttpHeaderNames.COOKIE);
-        if (cookieHeader != null) {
-            String[] cookies = cookieHeader.split(";");
-            for (String cookie : cookies) {
-                String[] parts = cookie.trim().split("=", 2);
-                if (parts.length == 2 && "webui_token".equals(parts[0].trim())) {
-                    return parts[1].trim();
-                }
-            }
-        }
-        return null;
     }
 }

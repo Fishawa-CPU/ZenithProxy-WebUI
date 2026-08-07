@@ -64,7 +64,7 @@ public class AuthController {
      * Handle logout request
      */
     public void handleLogout(ChannelHandlerContext ctx, FullHttpRequest request) {
-        String token = extractToken(request);
+        String token = AuthHandler.extractToken(request);
         if (token != null) {
             authManager.invalidateToken(token);
         }
@@ -78,7 +78,7 @@ public class AuthController {
      * Handle check auth status
      */
     public void handleStatus(ChannelHandlerContext ctx, FullHttpRequest request) {
-        String token = extractToken(request);
+        String token = AuthHandler.extractToken(request);
         String username = token != null ? authManager.validateToken(token) : null;
 
         if (username != null) {
@@ -97,26 +97,6 @@ public class AuthController {
             return addr.getAddress().getHostAddress();
         }
         return "unknown";
-    }
-
-    private String extractToken(FullHttpRequest request) {
-        String cookieHeader = request.headers().get(HttpHeaderNames.COOKIE);
-        if (cookieHeader != null) {
-            String[] cookies = cookieHeader.split(";");
-            for (String cookie : cookies) {
-                String[] parts = cookie.trim().split("=", 2);
-                if (parts.length == 2 && "webui_token".equals(parts[0].trim())) {
-                    return parts[1].trim();
-                }
-            }
-        }
-
-        String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            return authHeader.substring(7);
-        }
-
-        return null;
     }
 
     private String buildCookie(String token, int maxAge) {
