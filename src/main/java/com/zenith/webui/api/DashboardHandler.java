@@ -82,25 +82,28 @@ public class DashboardHandler {
     private void pushDashboardHeartbeat() {
         String json = HttpHelper.GSON.toJson(buildDashboardData());
         String frame = "data: " + json + "\n\n";
-
-        List<Channel> dead = new ArrayList<>(2);
-        for (Channel ch : WebUIPlugin.dashboardSseClients) {
-            if (!ch.isActive()) {
-                dead.add(ch);
-                continue;
+        // Use retainedDuplicate pattern — one allocation for all clients (same as broadcastSSE)
+        ByteBuf template = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
+        try {
+            List<Channel> dead = new ArrayList<>(2);
+            for (Channel ch : WebUIPlugin.dashboardSseClients) {
+                if (!ch.isActive()) {
+                    dead.add(ch);
+                    continue;
+                }
+                try {
+                    ch.writeAndFlush(new DefaultHttpContent(template.retainedDuplicate()))
+                        .addListener(f -> { if (!f.isSuccess()) ch.close(); });
+                } catch (Exception e) {
+                    ch.close();
+                    dead.add(ch);
+                }
             }
-            try {
-                ByteBuf buf = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
-                ch.writeAndFlush(new DefaultHttpContent(buf)).addListener(f -> {
-                    if (!f.isSuccess()) ch.close();
-                });
-            } catch (Exception e) {
-                ch.close();
-                dead.add(ch);
+            if (!dead.isEmpty()) {
+                WebUIPlugin.dashboardSseClients.removeAll(dead);
             }
-        }
-        if (!dead.isEmpty()) {
-            WebUIPlugin.dashboardSseClients.removeAll(dead);
+        } finally {
+            template.release();
         }
     }
 

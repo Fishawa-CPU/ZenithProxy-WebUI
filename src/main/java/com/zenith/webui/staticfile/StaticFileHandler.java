@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Serves static files from classpath and plugin directory with caching.
@@ -17,9 +19,22 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class StaticFileHandler {
     private static final int FILE_CACHE_MAX_SIZE = 128;
-    private static final ConcurrentHashMap<Path, byte[]> fileCache = new ConcurrentHashMap<>();
+    /** LRU file cache: access-order LinkedHashMap wrapped in synchronizedMap for thread safety. */
+    private static final Map<Path, byte[]> fileCache = Collections.synchronizedMap(
+        new LinkedHashMap<>(FILE_CACHE_MAX_SIZE, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Path, byte[]> eldest) {
+                return size() > FILE_CACHE_MAX_SIZE;
+            }
+        });
     /** Cache classpath resources keyed by path (e.g. "index.html"). */
-    private static final ConcurrentHashMap<String, byte[]> resourceCache = new ConcurrentHashMap<>();
+    private static final Map<String, byte[]> resourceCache = Collections.synchronizedMap(
+        new LinkedHashMap<>(FILE_CACHE_MAX_SIZE, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, byte[]> eldest) {
+                return size() > FILE_CACHE_MAX_SIZE;
+            }
+        });
     /** Sentinel for files that don't exist, to avoid repeated I/O. */
     private static final byte[] NOT_FOUND = new byte[0];
 
@@ -88,10 +103,6 @@ public class StaticFileHandler {
         try {
             byte[] content = null;
             if (Files.exists(path) && !Files.isDirectory(path)) {
-                if (fileCache.size() >= FILE_CACHE_MAX_SIZE) {
-                    var it = fileCache.keySet().iterator();
-                    if (it.hasNext()) it.remove();
-                }
                 content = Files.readAllBytes(path);
             }
             // Use sentinel to cache the "not found" result, avoiding repeated I/O

@@ -1,8 +1,6 @@
 package com.zenith.webui.api;
 
-import com.google.gson.JsonObject;
 import com.zenith.webui.WebUIPlugin;
-import com.zenith.webui.http.HttpHelper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -24,21 +22,20 @@ public class LogStreamHandler {
         response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.writeAndFlush(response);
 
-        // Push recent history first so the client sees existing logs
+        // Push recent history using pre-serialized SSE frames (no re-serialization)
+        StringBuilder sb = new StringBuilder(WebUIPlugin.logBuffer.size() * 128);
         for (Map<String, Object> entry : WebUIPlugin.logBuffer) {
-            JsonObject log = new JsonObject();
-            log.addProperty("level", (String) entry.get("level"));
-            log.addProperty("logger", (String) entry.get("logger"));
-            log.addProperty("message", (String) entry.get("message"));
-            log.addProperty("timestamp", (long) entry.get("timestamp"));
-            String json = HttpHelper.GSON.toJson(log);
-            String sseData = "data: " + json + "\n\n";
+            String sseFrame = (String) entry.get("sseFrame");
+            if (sseFrame != null) {
+                sb.append(sseFrame);
+            }
+        }
+        if (sb.length() > 0) {
             try {
-                ByteBuf buf = Unpooled.copiedBuffer(sseData, CharsetUtil.UTF_8);
-                ctx.write(new DefaultHttpContent(buf));
+                ByteBuf buf = Unpooled.copiedBuffer(sb.toString(), CharsetUtil.UTF_8);
+                ctx.writeAndFlush(new DefaultHttpContent(buf));
             } catch (Exception ignored) {}
         }
-        ctx.flush();
 
         WebUIPlugin.sseClients.add(ctx.channel());
     }

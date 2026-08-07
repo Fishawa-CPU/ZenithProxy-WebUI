@@ -263,26 +263,26 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     public void broadcastLog(String level, String logger, String message) {
         message = LogTranslator.translate(message);
         long ts = System.currentTimeMillis();
+        // Serialize JSON once and store pre-built SSE frame for both SSE push and history replay
+        com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+        o.addProperty("level", level);
+        o.addProperty("logger", logger);
+        o.addProperty("message", message);
+        o.addProperty("timestamp", ts);
+        String json = HttpHelper.GSON.toJson(o);
+        String sseFrame = "data: " + json + "\n\n";
         // Map.of is ~4x cheaper than LinkedHashMap for small fixed-size maps
         Map<String, Object> entry = Map.of(
             "level", level, "logger", logger, "message", message,
-            "timestamp", ts, "id", logPollCounter.getAndIncrement());
+            "timestamp", ts, "id", logPollCounter.getAndIncrement(),
+            "sseFrame", sseFrame);
         logBuffer.addLast(entry);
         // Use counter instead of O(n) ConcurrentLinkedDeque.size()
         if (logBufferApproxSize.incrementAndGet() > LOG_BUFFER_MAX) {
             logBuffer.pollFirst();
             logBufferApproxSize.decrementAndGet();
         }
-        notifyLogSSE(level, logger, message, ts);
-    }
-
-    private void notifyLogSSE(String level, String logger, String message, long ts) {
-        com.google.gson.JsonObject o = new com.google.gson.JsonObject();
-        o.addProperty("level", level);
-        o.addProperty("logger", logger);
-        o.addProperty("message", message);
-        o.addProperty("timestamp", ts);
-        broadcastSSE(sseClients, HttpHelper.GSON.toJson(o));
+        broadcastSSE(sseClients, json);
     }
 
     /** Push a title packet to log-stream SSE clients. Called by {@link TitlePacketHandler}. */
