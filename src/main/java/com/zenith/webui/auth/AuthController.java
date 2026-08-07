@@ -6,7 +6,6 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
-import io.netty.util.CharsetUtil;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +38,7 @@ public class AuthController {
 
             String username = json.get("username").getAsString();
             String password = json.get("password").getAsString();
-            String clientIp = getClientIp(ctx, request);
+            String clientIp = getClientIp(ctx);
 
             String token = authManager.authenticate(username, password, clientIp);
             if (token != null) {
@@ -90,8 +89,7 @@ public class AuthController {
         }
     }
 
-    private String getClientIp(ChannelHandlerContext ctx, FullHttpRequest request) {
-        // Use TCP remote address for rate limiting (not headers which can be spoofed)
+    private String getClientIp(ChannelHandlerContext ctx) {
         Channel channel = ctx.channel();
         if (channel.remoteAddress() instanceof InetSocketAddress addr) {
             return addr.getAddress().getHostAddress();
@@ -100,7 +98,6 @@ public class AuthController {
     }
 
     private static String buildCookie(String token, int maxAge) {
-        // HttpOnly prevents JS access; SameSite=Lax prevents CSRF
         if (maxAge > 0) {
             return "webui_token=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge;
         }
@@ -108,30 +105,24 @@ public class AuthController {
     }
 
     private void sendJson(ChannelHandlerContext ctx, HttpResponseStatus status, Object obj) {
-        String json = HttpHelper.GSON.toJson(obj);
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-
-        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
-        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-
-        ctx.write(response);
-        ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(bytes)));
-        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+        sendResponse(ctx, status, obj, null);
     }
 
     private void sendJsonWithCookie(ChannelHandlerContext ctx, HttpResponseStatus status,
                                      Object obj, String cookie) {
-        String json = HttpHelper.GSON.toJson(obj);
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        sendResponse(ctx, status, obj, cookie);
+    }
 
+    private void sendResponse(ChannelHandlerContext ctx, HttpResponseStatus status,
+                               Object obj, String cookie) {
+        byte[] bytes = HttpHelper.GSON.toJson(obj).getBytes(StandardCharsets.UTF_8);
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        response.headers().set(HttpHeaderNames.SET_COOKIE, cookie);
         response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-
+        if (cookie != null) {
+            response.headers().set(HttpHeaderNames.SET_COOKIE, cookie);
+        }
         ctx.write(response);
         ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(bytes)));
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);

@@ -20,15 +20,20 @@ public class AuthManager {
 
     private final WebUIConfig.AuthConfig config;
     private final Map<String, TokenInfo> tokens = new ConcurrentHashMap<>();
-    // Rate limit: key = "ip:minute_timestamp"
-    private final Map<String, Integer> rateLimitMap = new ConcurrentHashMap<>();
-    /** SSE channels keyed by token — for event-driven disconnect on logout/password-change. */
+    /** SSE channels keyed by token — for event-driven disconnect on token expiry/revocation. */
     private final Map<String, Channel> tokenChannels = new ConcurrentHashMap<>();
+    /** Rate limit: key = "ip:minute_timestamp" */
+    private final Map<String, Integer> rateLimitMap = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanupExecutor;
+
+    // Pre-computed credential bytes for constant-time comparison (avoids per-auth allocation)
+    private final byte[] usernameBytes;
+    private final byte[] passwordBytes;
 
     public AuthManager(WebUIConfig.AuthConfig config) {
         this.config = config;
-        // Background cleanup: expired tokens + stale rate-limit entries every 5 minutes
+        this.usernameBytes = config.username.getBytes(StandardCharsets.UTF_8);
+        this.passwordBytes = config.password.getBytes(StandardCharsets.UTF_8);
         cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "webui-auth-cleanup");
             t.setDaemon(true);
@@ -59,8 +64,9 @@ public class AuthManager {
         }
         rateLimitMap.put(rateKey, attempts != null ? attempts + 1 : 1);
 
-        // Constant-time credential comparison
-        if (constantTimeEquals(config.username, username) && constantTimeEquals(config.password, password)) {
+        // Constant-time comparison using pre-computed byte arrays
+        if (secureEquals(usernameBytes, username.getBytes(StandardCharsets.UTF_8))
+            && secureEquals(passwordBytes, password.getBytes(StandardCharsets.UTF_8))) {
             String token = generateToken(username);
             LOG.info("User authenticated: {}", username);
             return token;
@@ -71,25 +77,17 @@ public class AuthManager {
     }
 
     /**
-     * Validate token. Called infrequently thanks to per-channel auth caching
-     * (see {@link AuthHandler#AUTH_CACHE_MS}) and batched SSE validation.
-     * @return Username if valid, null otherwise
+     * Validate token and return username if not expired.
+     * Called infrequently thanks to per-channel auth caching (30s).
+     * Expired tokens are removed and their SSE channels closed.
      */
     public String validateToken(String token) {
-        return validateToken(token, System.currentTimeMillis());
-    }
-
-    /**
-     * Validate token with externally-supplied timestamp — avoids repeated
-     * {@link System#currentTimeMillis()} calls when checking multiple tokens.
-     */
-    public String validateToken(String token, long now) {
         if (token == null || token.isEmpty()) return null;
 
         TokenInfo tokenInfo = tokens.get(token);
         if (tokenInfo == null) return null;
 
-        if (now > tokenInfo.expiry) {
+        if (System.currentTimeMillis() > tokenInfo.expiry) {
             tokens.remove(token);
             cleanupTokenChannel(token);
             return null;
@@ -102,14 +100,14 @@ public class AuthManager {
      * Register an SSE channel for a token. The channel will be closed
      * automatically when the token is invalidated (logout / password change).
      */
-    public void registerChannel(String token, Channel channel) {
+    void registerChannel(String token, Channel channel) {
         if (token != null && channel != null) {
             tokenChannels.put(token, channel);
         }
     }
 
     /** Unregister an SSE channel (called on channelInactive). */
-    public void unregisterChannel(Channel channel) {
+    void unregisterChannel(Channel channel) {
         if (channel == null) return;
         tokenChannels.values().removeIf(ch -> ch == channel);
     }
@@ -139,33 +137,13 @@ public class AuthManager {
         LOG.info("All tokens invalidated for user: {}", username);
     }
 
-    /**
-     * Constant-time string comparison to prevent timing attacks
-     */
-    private static boolean constantTimeEquals(String a, String b) {
-        if (a == null || b == null) return false;
-        byte[] aBytes = a.getBytes(StandardCharsets.UTF_8);
-        byte[] bBytes = b.getBytes(StandardCharsets.UTF_8);
-        return MessageDigest.isEqual(aBytes, bBytes);
+    private static boolean secureEquals(byte[] a, byte[] b) {
+        return MessageDigest.isEqual(a, b);
     }
 
     private String generateToken(String username) {
         String token = UUID.randomUUID().toString();
-        long expiry = System.currentTimeMillis() + config.tokenExpiry;
-        tokens.put(token, new TokenInfo(username, expiry));
-
-        // Cleanup expired tokens (and their SSE channels) when map grows large
-        if (tokens.size() > 100) {
-            long now = System.currentTimeMillis();
-            tokens.entrySet().removeIf(e -> {
-                if (now > e.getValue().expiry) {
-                    cleanupTokenChannel(e.getKey());
-                    return true;
-                }
-                return false;
-            });
-        }
-
+        tokens.put(token, new TokenInfo(username, System.currentTimeMillis() + config.tokenExpiry));
         return token;
     }
 
