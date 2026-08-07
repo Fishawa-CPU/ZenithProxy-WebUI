@@ -38,7 +38,8 @@ public class WebUIServer {
         cleanupStaleResources();
         try {
             bossGroup = new NioEventLoopGroup(1);
-            workerGroup = new NioEventLoopGroup();
+            // WebUI dashboard typically has 1-3 concurrent users; 2-4 worker threads are sufficient
+            workerGroup = new NioEventLoopGroup(Math.min(4, Runtime.getRuntime().availableProcessors()));
 
             ServerBootstrap b = new ServerBootstrap();
             b.group(bossGroup, workerGroup)

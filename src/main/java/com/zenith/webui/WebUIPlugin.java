@@ -76,7 +76,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     public static final ConcurrentLinkedDeque<Map<String, Object>> logBuffer = new ConcurrentLinkedDeque<>();
     static final AtomicLong logPollCounter = new AtomicLong(0);
     /** Approximate log buffer size counter — avoids O(n) {@code ConcurrentLinkedDeque.size()}. */
-    static final AtomicInteger logBufferApproxSize = new AtomicInteger(0);
+    public static final AtomicInteger logBufferApproxSize = new AtomicInteger(0);
 
     public static final List<Channel> sseClients = new CopyOnWriteArrayList<>();
     public static final List<Channel> dashboardSseClients = new CopyOnWriteArrayList<>();
@@ -263,15 +263,10 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     public void broadcastLog(String level, String logger, String message) {
         message = LogTranslator.translate(message);
         long ts = System.currentTimeMillis();
-        // Serialize JSON once and store pre-built SSE frame for both SSE push and history replay
-        com.google.gson.JsonObject o = new com.google.gson.JsonObject();
-        o.addProperty("level", level);
-        o.addProperty("logger", logger);
-        o.addProperty("message", message);
-        o.addProperty("timestamp", ts);
-        String json = HttpHelper.GSON.toJson(o);
-        String sseFrame = "data: " + json + "\n\n";
-        // Map.of is ~4x cheaper than LinkedHashMap for small fixed-size maps
+
+        // Manual JSON serialization + SSE frame in one pass — avoids Gson/JsonObject allocation
+        String sseFrame = buildSseFrame(level, logger, message, ts);
+
         Map<String, Object> entry = Map.of(
             "level", level, "logger", logger, "message", message,
             "timestamp", ts, "id", logPollCounter.getAndIncrement(),
@@ -282,24 +277,25 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             logBuffer.pollFirst();
             logBufferApproxSize.decrementAndGet();
         }
-        broadcastSSE(sseClients, json);
+        broadcastSSE(sseClients, sseFrame);
     }
 
     /** Push a title packet to log-stream SSE clients. Called by {@link TitlePacketHandler}. */
     public static void pushTitle(String text) {
-        com.google.gson.JsonObject o = new com.google.gson.JsonObject();
-        o.addProperty("type", "title");
-        o.addProperty("text", text);
-        broadcastSSE(sseClients, HttpHelper.GSON.toJson(o));
+        StringBuilder sb = new StringBuilder(64 + text.length());
+        sb.append("data: {\"type\":\"title\",\"text\":\"");
+        escapeJson(sb, text);
+        sb.append("\"}\n\n");
+        broadcastSSE(sseClients, sb.toString());
     }
 
     /**
-     * Write an SSE data frame to every active channel in {@code clients}.
+     * Write a pre-built SSE data frame to every active channel in {@code clients}.
      * Uses retainedDuplicate to avoid per-channel ByteBuf allocation.
+     * @param sseFrame pre-built SSE frame string (format: "data: {...}\n\n")
      */
-    public static void broadcastSSE(List<Channel> clients, String json) {
-        String frame = "data: " + json + "\n\n";
-        ByteBuf template = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
+    public static void broadcastSSE(List<Channel> clients, String sseFrame) {
+        ByteBuf template = Unpooled.copiedBuffer(sseFrame, CharsetUtil.UTF_8);
         clients.removeIf(ch -> {
             if (!ch.isActive()) {
                 return true;
@@ -314,5 +310,36 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             }
         });
         template.release();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  JSON/SSE helpers (zero-allocation serialization)
+    // ═══════════════════════════════════════════════════════════
+
+    /** Build an SSE data frame with manual JSON serialization to avoid Gson/JsonObject allocation. */
+    private static String buildSseFrame(String level, String logger, String message, long ts) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("data: {\"level\":\"");
+        escapeJson(sb, level);
+        sb.append("\",\"logger\":\"");
+        escapeJson(sb, logger);
+        sb.append("\",\"message\":\"");
+        escapeJson(sb, message);
+        sb.append("\",\"timestamp\":").append(ts).append("}\n\n");
+        return sb.toString();
+    }
+
+    /** Minimal JSON string escaping — handles characters that break JSON strings. */
+    private static void escapeJson(StringBuilder sb, String s) {
+        for (int i = 0, len = s.length(); i < len; i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                default:   sb.append(c);
+            }
+        }
     }
 }

@@ -932,7 +932,17 @@ function exportTerminalContent() {
 // ── Players ───────────────────────────────────
 function escapeHtml(str) {
     if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    // Single-pass replacement avoids 5x full-string scans
+    return str.replace(/[&<>"']/g, function(m) {
+        switch (m) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#039;';
+            default:  return m;
+        }
+    });
 }
 
 // ── Whitelist ─────────────────────────────────

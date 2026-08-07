@@ -23,7 +23,8 @@ public class LogStreamHandler {
         ctx.writeAndFlush(response);
 
         // Push recent history using pre-serialized SSE frames (no re-serialization)
-        StringBuilder sb = new StringBuilder(WebUIPlugin.logBuffer.size() * 128);
+        // Use approximate size to avoid O(n) ConcurrentLinkedDeque.size() traversal
+        StringBuilder sb = new StringBuilder(WebUIPlugin.logBufferApproxSize.get() * 128);
         for (Map<String, Object> entry : WebUIPlugin.logBuffer) {
             String sseFrame = (String) entry.get("sseFrame");
             if (sseFrame != null) {
