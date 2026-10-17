@@ -55,16 +55,18 @@ if [ -d "$DIST/$APP_NAME" ]; then
     find "$DIST/$APP_NAME" -mindepth 1 -delete
     rmdir "$DIST/$APP_NAME"
 fi
+
+# 主类是桌面启动器：它先拉起 ZenithProxy，等 WebUI 端口就绪，再用 JavaFX
+# 开一个 WebView 窗口。不加 --win-console —— 桌面应用不该弹黑窗，日志落在 log/。
 "$JPACKAGE" \
     --type app-image \
     --name "$APP_NAME" \
     --input "$DIST/lib" \
-    --main-jar zenithproxy.jar \
-    --main-class com.zenith.ProxyLaunchWrapper \
+    --main-jar launcher.jar \
+    --main-class com.zenith.webui.desktop.DesktopLauncher \
     --dest "$DIST" \
     --app-version "$APP_VERSION" \
     --vendor "wxh1024" \
-    --win-console \
     --java-options "-Dfile.encoding=UTF-8"
 
 # 插件和启动配置必须落在应用根目录（也就是 cwd），不能被 jpackage 收进 app/
@@ -81,5 +83,5 @@ fi
 
 echo
 echo "==> 完成：$DIST/$APP_NAME"
-echo "    双击 $APP_NAME/$APP_NAME.exe 启动，浏览器访问 http://localhost:8080"
-echo "    首次运行会在目录下生成 config.json 和 plugins/webui/config.json（含随机密码，见控制台输出）"
+echo "    双击 $APP_NAME/$APP_NAME.exe 启动，会直接弹出桌面窗口（JavaFX WebView 承载面板）"
+echo "    启动器会读 plugins/webui/config.json 里的凭据自动登录，首次运行由插件生成随机密码"
