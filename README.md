@@ -33,7 +33,7 @@
 
 方式一：从 [Releases](https://github.com/wxh1024/ZenithProxy-WebUI/releases) 下载已编译的 JAR。
 
-方式二：本地构建（需要 JDK 21）：
+方式二：本地构建（需要 JDK 21 和访问 `maven.2b2t.vc` 的网络）：
 
 ```bash
 ./gradlew shadowJar
@@ -255,4 +255,4 @@ later version.
 
 第三方依赖的许可见各自项目：[Netty](https://netty.io/)（Apache-2.0）、
 [Gson](https://github.com/google/gson)（Apache-2.0）、[Chart.js](https://www.chartjs.org/)（MIT）。
-`libs/ZenithProxy.jar` 为编译期依赖（`compileOnly`），不随本项目分发。
+ZenithProxy 通过 `maven.2b2t.vc` 以 `compileOnly` 引入，不随本项目分发。

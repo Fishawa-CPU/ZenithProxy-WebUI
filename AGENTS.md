@@ -11,7 +11,8 @@ A ZenithProxy plugin providing a browser-based management dashboard. Java backen
 ./gradlew shadowJar      # fat JAR only (output: build/libs/ZenithProxy-WebUI-1.4.0.jar)
 ```
 
-Requires **Java 21** (set in `build.gradle.kts` toolchain). No test suite exists.
+Requires **Java 21** (set in `build.gradle.kts` toolchain) and network access to
+`maven.2b2t.vc` for the ZenithProxy dependency. No test suite exists.
 
 CI lives in `.github/workflows/build.yml`: every push/PR builds the fat JAR and uploads it as
 a workflow artifact; pushing a `v*` tag also publishes a GitHub Release with the JAR attached.
@@ -52,7 +53,10 @@ plugins/webui/
 ## Key Facts for Agents
 
 - **No test suite, no linter.** CI (`.github/workflows/build.yml`) is the only verification step; it compiles, checks the version pair (build.gradle.kts ↔ plugin.json) and uploads the JAR.
-- **External dependency**: `ZenithProxy.jar` in `libs/` directory (compileOnly, committed to git). If the build fails on dependency resolution, the JAR may be missing or outdated.
+- **External dependency**: ZenithProxy is resolved from Maven — `com.zenith:ZenithProxy:<proxy>+<mc>`
+  (e.g. `3.7.3+1.21.4`) as `compileOnly`. Repositories (`maven.2b2t.vc/releases`, `/remote`) are declared
+  in `settings.gradle.kts`; the version lives in `build.gradle.kts` as `zenithProxyVersion`.
+  There is no local JAR in `libs/` anymore — bump the version if the plugin API changes.
 - **NIO Server**: Uses Netty `NioServerSocketChannel` for non-blocking I/O with zero-copy file transfer.
 - **JSON policy**: every response body and SSE frame is produced by Gson (`HttpHelper.GSON` / `GSON_NULLS` / `sseFrame`). Never assemble JSON with `StringBuilder` — the old hand-rolled escaping silently dropped control characters and broke `JSON.parse` in the browser.
 - **Dashboard nulls**: `DashboardData` is serialized with `GSON_NULLS` because `player.health`/`player.food` must appear as explicit `null` when the bot is offline; the default Gson would omit the fields.

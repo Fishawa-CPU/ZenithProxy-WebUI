@@ -16,6 +16,13 @@
 - 新增 GitHub Wiki：安装与部署、配置说明、功能说明、API 参考、架构与代码结构、
   认证与安全、开发与发布、常见问题。
 
+### 构建
+
+- **移除入库的 `libs/ZenithProxy.jar`（约 58 MB）**，改为通过 `maven.2b2t.vc` 解析
+  `com.zenith:ZenithProxy:3.7.3+1.21.4`（`compileOnly`）。版本集中在 `build.gradle.kts`
+  的 `zenithProxyVersion`，`libs/` 已加入 `.gitignore`。
+- Git 历史已重写以彻底移除该 JAR，克隆体积从 ~58 MB 降到几 MB。
+
 ## [1.4.0] - 2026-10-17
 
 ### 变更
