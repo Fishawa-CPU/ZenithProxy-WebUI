@@ -25,6 +25,7 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
     private final DashboardHandler dashboardHandler;
     private final LogStreamHandler logStreamHandler;
     private final WhitelistHandler whitelistHandler;
+    private final ConfigHandler configHandler;
     private final StaticFileHandler staticFileHandler;
 
     public WebUIChannelHandler(
@@ -34,6 +35,7 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
             DashboardHandler dashboardHandler,
             LogStreamHandler logStreamHandler,
             WhitelistHandler whitelistHandler,
+            ConfigHandler configHandler,
             StaticFileHandler staticFileHandler) {
         this.authHandler = authHandler;
         this.authController = authController;
@@ -41,6 +43,7 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
         this.dashboardHandler = dashboardHandler;
         this.logStreamHandler = logStreamHandler;
         this.whitelistHandler = whitelistHandler;
+        this.configHandler = configHandler;
         this.staticFileHandler = staticFileHandler;
     }
 
@@ -96,6 +99,7 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
                 case "/api/dashboard" -> dashboardHandler.handleDashboard(ctx);
                 case "/api/dashboard/stream" -> dashboardHandler.handleDashboardStream(ctx);
                 case "/api/whitelist" -> whitelistHandler.handleWhitelist(ctx, req);
+                case "/api/config" -> configHandler.handleConfig(ctx, req);
                 default -> {
                     if (path.startsWith("/api/")) {
                         // Unknown API route: returning index.html would look like a success

@@ -19,7 +19,8 @@
 - **状态监控仪表板**: 实时显示代理连接状态、当前用户、代理地址、运行时间、玩家连接数、队列位置
 - **系统资源监控**: CPU 占用、内存占用、网络流量、延迟波动的实时图表（Chart.js）
 - **服务器控制**: 一键连接/断开/重连/关闭代理
-- **配置管理**: 图形化编辑认证、客户端、服务器配置，保存后提示重启生效
+- **配置中心**: 场景预设（2b2t 正版挂机 / 离线插件服 / 其他正版服）+ 必填设置 + 按模块折叠的全字段表单，
+  覆盖 498 个配置项的字段路径、中文标签与说明；直接读写运行中的 ZenithProxy 配置，并支持导出 `config.json`
 - **命令终端**: 在网页中执行 ZenithProxy 命令，支持自动补全、命令历史、快捷键（Tab/↑↓/Ctrl+L/Ctrl+C）
 - **日志查看器**: SSE 实时推送系统日志，支持日志级别颜色区分、导出
 - **玩家列表**: 查看当前连接的玩家（控制器/观察者），支持踢出操作
@@ -39,11 +40,11 @@
 ./gradlew shadowJar
 ```
 
-输出文件：`build/libs/ZenithProxy-WebUI-1.4.0.jar`
+输出文件：`build/libs/ZenithProxy-WebUI-1.5.0.jar`
 
 ### 2. 安装插件
 
-将 `ZenithProxy-WebUI-1.4.0.jar` 复制到 ZenithProxy 的 `plugins/` 目录。
+将 `ZenithProxy-WebUI-1.5.0.jar` 复制到 ZenithProxy 的 `plugins/` 目录。
 
 ### 3. 配置文件
 
@@ -219,8 +220,8 @@ src/main/resources/
 
 ```bash
 # 同步修改 build.gradle.kts 与 zenithproxy.plugin.json 中的 version
-git commit -am "chore: release v1.4.0"
-git tag v1.4.0
+git commit -am "chore: release v1.5.0"
+git tag v1.5.0
 git push origin main --tags
 ```
 

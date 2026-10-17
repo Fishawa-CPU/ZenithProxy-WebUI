@@ -97,6 +97,13 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private WebUIServer server;
     private WebUILogHandler logHandler;
 
+    /**
+     * 数据包编解码器只能注册一次：{@code PacketCodecRegistries} 是全局注册表，
+     * 没有反注册路径，重复注册会让队列/标题包被处理多遍。
+     */
+    private volatile boolean coreHandlersRegistered = false;
+    private volatile boolean authBypasserRegistered = false;
+
     // ── Adventure serialiser ──────────────────────────────────
     private static final LegacyComponentSerializer LEGACY_SERIALIZER =
         LegacyComponentSerializer.legacySection();
@@ -134,6 +141,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             dashboardHandler,
             new LogStreamHandler(),
             new WhitelistHandler(),
+            new ConfigHandler(),
             new StaticFileHandler(pluginDir));
 
         // Server
@@ -190,6 +198,11 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     // ═══════════════════════════════════════════════════════════
 
     private void registerPacketHandlers() {
+        // PacketCodecRegistries 是全局注册表，没有对应的反注册路径。stop() 之后
+        // 再 start() 若重新注册一遍，队列/标题包会被处理两次 —— 用一次性标志挡住。
+        if (coreHandlersRegistered) {
+            return;
+        }
         try {
             var c = PacketHandlerCodec.clientBuilder()
                 .setId("webui-title-handler").setPriority(100)
@@ -212,9 +225,13 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         } catch (Exception e) { LOG.warn("Failed to register Queue parser", e); }
 
         registerAuthBypasserHandlers();
+        coreHandlersRegistered = true;
     }
 
     private void registerAuthBypasserHandlers() {
+        if (authBypasserRegistered) {
+            return;
+        }
         if (!configManager.getConfig().authBypasser.enabled) {
             return;
         }
@@ -232,6 +249,7 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             LOG.info("AuthBypasser packet handlers registered (rewriteOfflineUuid={}, bypassAuthenticateHello={})",
                 configManager.getConfig().authBypasser.rewriteOfflineUuid,
                 configManager.getConfig().authBypasser.bypassAuthenticateHello);
+            authBypasserRegistered = true;
         } catch (Exception e) {
             LOG.warn("Failed to register AuthBypasser handlers: {}", e.getMessage());
         }

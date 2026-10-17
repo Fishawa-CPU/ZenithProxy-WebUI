@@ -4,6 +4,28 @@
 
 ## [未发布]
 
+### 新增
+
+- **配置中心页面**：新增 `配置中心 / Config` 页，把 [ZenithProxy 配置中心](https://www.hebaiju.cn/zenith-config/index.html)
+  的能力搬进面板内，直接读写**运行中的**代理配置。
+  - 场景预设：2b2t 正版挂机 / 离线插件服 / 其他正版服，一键填好登录方式、服务器地址、
+    正版验证与保活参数（含 2b2t 定制的局域网广播、动态排队估算、队列刷新间隔）。
+  - 必填设置与更多设置分组，字段来自 `web/config-meta.json` 的 498 条中文标签与说明。
+  - 「全部字段」按模块折叠展示完整配置树，开关 / 数字 / 文本可直接编辑，数组与对象字段只读。
+  - 改动以点分路径补丁提交，保存后写入运行内存；页面明确提示**无配置热重载，部分设置需重启生效**。
+  - 支持「下载 config.json」与「恢复默认」（恢复默认不会覆盖密码、令牌等敏感字段）。
+- 新增 `/api/config` 接口：`GET` 返回当前配置快照（敏感字段打码为 `********`），
+  `POST` 接收 `{"patch": {"a.b.c": value}}` 按字段写回。
+- 新增 `ConfigPatcher`：反射按点分路径写 `CONFIG`，只改标量字段，逐字段赋值而**不替换**
+  `CONFIG` 引用（ZenithProxy 内部缓存了 `CONFIG.client` 这类子对象引用）。
+- 新增 `tools/ConfigPatcherTest.java`：不依赖 JUnit 与 ZenithProxy jar 的独立回归测试（17 个用例）。
+
+### 修复
+
+- **数据包处理器重复注册**：`/webui disable` 后再 `/webui enable` 会向全局
+  `PacketCodecRegistries` 重复注册标题/队列/AuthBypasser 处理器，导致同一数据包被处理多遍。
+  现在用一次性标志挡住重复注册。
+
 ### 许可证
 
 - 项目改为 **AGPL-3.0-or-later**（GNU Affero 通用公共许可证 v3 或更高版本）开源，

@@ -23,13 +23,15 @@ a workflow artifact; pushing a `v*` tag also publishes a GitHub Release with the
 src/main/java/com/zenith/webui/
   WebUIPlugin.java          # Plugin entrypoint, lifecycle, SSE broadcast, log buffer
   TitlePacketHandler.java   # Title packet handler
-  api/                      # /api handlers: commands, dashboard, log stream, whitelist
+  api/                      # /api handlers: commands, dashboard, log stream, whitelist, config
     DashboardHandler.java   # Aggregated dashboard payload (POJO → Gson)
     DashboardData.java      # Dashboard DTO — field names are the frontend contract
+    ConfigHandler.java      # Config center: GET snapshot (secrets masked) + POST dotted-path patch
   auth/                     # Token auth: filter, manager, login/logout controller
   authbypass/               # Offline-auth bypass packet handlers (hybrid-auth servers)
   command/                  # /webui enable|disable|status
   config/                   # WebUIConfig data class + config.json manager
+    ConfigPatcher.java      # Reflective dotted-path writer for the live ZenithProxy CONFIG
   http/HttpHelper.java      # Response helpers + shared Gson (+ SSE frame builder)
   queue/QueueParser.java    # 3c3u.org / 2b2t.org queue-position packet parser
   server/                   # Netty bootstrap + request routing
@@ -39,7 +41,11 @@ src/main/resources/
   web/
     index.html, app.js, styles.css   # Frontend (vanilla JS, no build step)
     login.html                       # Authentication login page
+    config-meta.json                 # 498 field labels/descriptions for the config center
+    config-default.json              # ZenithProxy default config, used by "restore defaults"
   zenithproxy.plugin.json            # Plugin metadata (entrypoint class, id, version)
+tools/
+  ConfigPatcherTest.java             # Standalone regression test (no JUnit, no ZenithProxy jar)
 ```
 
 ## Runtime Directory Structure
@@ -52,7 +58,7 @@ plugins/webui/
 
 ## Key Facts for Agents
 
-- **No test suite, no linter.** CI (`.github/workflows/build.yml`) is the only verification step; it compiles, checks the version pair (build.gradle.kts ↔ plugin.json) and uploads the JAR.
+- **No JUnit test suite, no linter.** CI (`.github/workflows/build.yml`) is the main verification step; it compiles, checks the version pair (build.gradle.kts ↔ plugin.json) and uploads the JAR. The one exception is `tools/ConfigPatcherTest.java` — a standalone `main()` regression test for the reflective config writer that needs neither JUnit nor the ZenithProxy jar (run command in its header).
 - **External dependency**: ZenithProxy is resolved from Maven — `com.zenith:ZenithProxy:<proxy>+<mc>`
   (e.g. `3.7.3+1.21.4`) as `compileOnly`. Repositories (`maven.2b2t.vc/releases`, `/remote`) are declared
   in `settings.gradle.kts`; the version lives in `build.gradle.kts` as `zenithProxyVersion`.
@@ -71,6 +77,19 @@ plugins/webui/
 - **stop() semantics**: `stop()` disables the WebUI but does not shut down `AuthManager` (tokens must survive a disable/enable cycle). It is safe to call repeatedly.
 - **Auth cache**: `AuthHandler` caches successful validation per TCP channel for 30s, guarded by `AuthManager.epoch()` — logout/password change bumps the epoch and invalidates every channel's cache immediately.
 - **Input validation**: POST handlers validate JSON body is non-empty and required fields exist before processing. Unsupported methods return `405`, unknown `/api/*` paths return `404` (never the SPA index).
+- **Config center**: `/api/config` reads and writes the *live* ZenithProxy `CONFIG` object field by field
+  via `ConfigPatcher` — never by replacing the `CONFIG` reference (ZenithProxy caches sub-object
+  references such as `CONFIG.client`). Only scalars (`boolean`/numeric/`String`/`enum`) are writable;
+  arrays and nested objects are reported back in `skipped` and must go through their own endpoint
+  (e.g. `/api/whitelist`) or a manual `config.json` edit. Writes go to memory only — ZenithProxy has
+  **no config hot-reload**, so the UI says "restart to apply" and never claims instant effect.
+- **Secret masking**: `ConfigHandler` masks any string field whose name normalizes to
+  `password`/`passwd`/`secret`/`token`/`apikey`/`privatekey`/`webhookurl`/`authtoken`.
+  The mask `********` sent back in a patch is treated as "unchanged" and skipped, so a form
+  round-trip never overwrites a credential with the placeholder.
+- **Config field metadata**: `web/config-meta.json` (labels/descriptions) and `web/config-default.json`
+  are served as plain static files, not embedded in the API response — keeping `/api/config` small.
+  They are derived from the ZenithProxy default config; refresh them when the proxy version bumps.
 
 ## Configuration
 
@@ -109,6 +128,8 @@ To disable authentication, set `auth.enabled` to `false` in config.json.
 | `/api/logs/stream` | GET | Yes | SSE stream: pushes log history (last 500) then real-time log entries |
 | `/api/whitelist` | GET | Yes | Returns whitelist status, player list, kick message, auto-add config |
 | `/api/whitelist` | POST | Yes | Whitelist CRUD: `{action: "toggle/add/remove/updateConfig", ...}` |
+| `/api/config` | GET | Yes | Full live-config snapshot; secret-named string fields replaced with `********` |
+| `/api/config` | POST | Yes | Apply `{patch: {"dotted.path": value}}` to the live `CONFIG` — scalars only |
 
 ### Notes
 
@@ -134,7 +155,9 @@ If the command produces structured output (embed, multi-line), it is converted t
 
 - **Dashboard**: Proxy status, player connection, uptime, version, CPU/memory/network/latency charts (2-min window, 60 data points refreshed via SSE)
 - **Modules**: Toggle modules with Chinese name subtitles (data from `/api/dashboard`)
-- **Config**: Edit auth/client/server settings, save triggers restart prompt
+- **Config**: Scenario presets (2b2t / offline plugin server / other online), required settings,
+  and a collapsible full-field tree with Chinese labels; edits are collected as a dotted-path patch
+  and applied to the live config, plus a `config.json` export
 - **Terminal**: Command execution with autocomplete (fetched from `/api/commands`), history, log display with log level colors (via SSE)
 - **Players**: Connected player list with kick button (via command execution)
 - **Whitelist**: Enable/disable, auto-add bot account, kick message, add/remove players

@@ -27,6 +27,10 @@
                     <span class="icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                     <span class="text"><span class="bilingual">白名单管理<span class="en">Whitelist</span></span></span>
                 </li>
+                <li class="nav-item" data-page="config">
+                    <span class="icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                    <span class="text"><span class="bilingual">配置中心<span class="en">Config</span></span></span>
+                </li>
             </ul>
             <div class="nav-footer">
                 <div class="user-info" id="userInfo" style="display:none; margin-top:12px;">
@@ -225,6 +229,58 @@
                     <div class="whitelist-list" id="whitelistList">
                         <!-- Whitelist entries will be loaded here -->
                     </div>
+                </div>
+            </section>
+
+            <!-- Config Center Page -->
+            <section class="page" id="config">
+                <div class="page-header">
+                    <h2>配置中心 <span class="en">Config Center</span></h2>
+                    <div class="cfg-toolbar">
+                        <button class="btn btn-secondary" onclick="cfgReload()">重新读取 Reload</button>
+                        <button class="btn btn-secondary" onclick="cfgRestoreDefaults()">恢复默认 Defaults</button>
+                        <button class="btn btn-secondary" onclick="cfgDownload()">下载 config.json</button>
+                        <button class="btn btn-primary" onclick="cfgApply()">保存 Apply</button>
+                    </div>
+                </div>
+
+                <div class="cfg-notice">
+                    ZenithProxy 没有配置热重载。这里的改动会写入运行中的配置对象，
+                    <strong>部分设置需要重启 ZenithProxy 才会生效</strong>；
+                    需要留档请用"下载 config.json"覆盖项目目录下的文件。
+                </div>
+
+                <div class="cfg-status" id="cfgStatus">正在读取配置...</div>
+
+                <div class="cfg-card">
+                    <h3>场景模式 <span class="en">Scenario</span></h3>
+                    <p class="cfg-hint">选一个场景 → 自动填好登录方式与服务器地址，之后仍可手动修改。</p>
+                    <div class="cfg-scenarios" id="cfgScenarios"></div>
+                </div>
+
+                <div class="cfg-card">
+                    <h3>必填设置 <span class="en">Required</span></h3>
+                    <div class="cfg-fields" id="cfgRequiredFields"></div>
+                </div>
+
+                <div class="cfg-card">
+                    <h3>更多设置 <span class="en">More</span></h3>
+                    <div class="cfg-fields" id="cfgMoreFields"></div>
+                </div>
+
+                <div class="cfg-card">
+                    <h3>全部字段 <span class="en">All fields</span></h3>
+                    <p class="cfg-hint">
+                        按模块展开。开关 / 数字 / 文本可以直接改并保存；数组和对象字段只读展示，
+                        请用对应页面（如白名单管理）或直接编辑 config.json。
+                    </p>
+                    <div class="cfg-tree" id="cfgTree"></div>
+                </div>
+
+                <div class="cfg-dirty-bar" id="cfgDirtyBar">
+                    <span id="cfgDirtyCount">0 项待保存</span>
+                    <button class="btn btn-primary" onclick="cfgApply()">保存</button>
+                    <button class="btn btn-secondary" onclick="cfgDiscard()">放弃改动</button>
                 </div>
             </section>
         </main>

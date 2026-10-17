@@ -149,6 +149,7 @@ function navigateTo(page) {
 
         case 'terminal': refreshTerminalLogs(); break;
         case 'players': loadWhitelist(); break;
+        case 'config': cfgEnter(); break;
     }
     if (page !== 'dashboard') stopSystemPolling();
 }
@@ -1072,4 +1073,477 @@ function showNotification(message, type = 'info') {
     document.body.appendChild(n);
     requestAnimationFrame(() => { n.style.opacity = '1'; n.style.transform = 'translateY(0)'; });
     setTimeout(() => { n.style.opacity = '0'; n.style.transform = 'translateY(-8px)'; setTimeout(() => n.remove(), 200); }, 3000);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Config Center
+//  数据来源：/api/config（当前运行配置快照）+ config-meta.json（中文标签）
+//  + config-default.json（ZenithProxy 默认值）
+// ══════════════════════════════════════════════════════════════
+
+const CFG = {
+    config: null,      // 当前配置树（服务端快照，含本地未保存改动）
+    meta: {},          // { "a.b.c": {label, desc} }
+    defaults: null,    // 默认配置树
+    dirty: {},         // 待提交改动 { path: value }
+    masked: new Set(), // 服务端打码的路径
+    mask: '********',
+    loaded: false,
+    loading: false
+};
+
+// 场景预设 —— 与 hebaiju.cn/zenith-config 保持一致
+const CFG_B2B2T_ON = {
+    'server.ping.lanBroadcast': true,
+    'server.dynamicQueueEtaEquation': true,
+    'server.queueStatusRefreshWhileNotOn2b2t': true,
+    'server.queueStatusRefreshMinutes': 5
+};
+const CFG_B2B2T_OFF = {
+    'server.ping.lanBroadcast': false,
+    'server.dynamicQueueEtaEquation': false,
+    'server.queueStatusRefreshWhileNotOn2b2t': false,
+    'server.queueStatusRefreshMinutes': 2147483647
+};
+const CFG_SCENARIOS = [
+    {
+        key: 'b2b2t', icon: '🏆', name: '2b2t 正版挂机', desc: '正版账号 + 2b2t.org',
+        set: { 'authentication.accountType': 'device_code', 'client.server.address': '2b2t.org', 'server.verifyUsers': true }
+    },
+    {
+        key: 'offline', icon: '🏰', name: '离线插件服', desc: '离线账号 + AuthMe 密码（3C3U.ORG）',
+        set: {
+            'authentication.accountType': 'offline', 'client.server.address': '3C3U.ORG',
+            'server.verifyUsers': false,
+            'client.keepAliveHandling.keepAliveMode': 'INDEPENDENT',
+            'client.keepAliveHandling.keepAliveQueueTimeoutMs': 200000
+        }
+    },
+    {
+        key: 'other', icon: '🌐', name: '其他正版服', desc: '正版账号 + 3C3U.ORG',
+        set: { 'authentication.accountType': 'device_code', 'client.server.address': '3C3U.ORG', 'server.verifyUsers': true }
+    }
+];
+
+const CFG_REQUIRED_GROUPS = [
+    ['账号登录', [
+        'authentication.accountType', 'authentication.email', 'authentication.username',
+        'authentication.password', 'authentication.openBrowserOnLogin'
+    ]],
+    ['服务器', [
+        'client.server.address', 'client.server.port', 'client.viaversion.enabled',
+        'client.viaversion.protocolVersion', 'server.bind.port', 'client.autoConnect',
+        'server.extra.whitelist.whitelist'
+    ]]
+];
+const CFG_MORE_GROUPS = [
+    ['挂机保护', [
+        'client.extra.antiafk.enabled', 'client.extra.autoRespawn.enabled', 'client.extra.autoEat.enabled',
+        'client.extra.autoTotem.enabled', 'client.extra.autoReconnect.enabled'
+    ]],
+    ['服务端接入', [
+        'server.verifyUsers', 'server.extra.whitelist.enable', 'server.extra.whitelist.autoAddClient',
+        'server.ping.onlinePlayerCount'
+    ]],
+    ['连接保活', [
+        'client.keepAliveHandling.keepAliveMode', 'client.keepAliveHandling.keepAliveQueueTimeoutMs'
+    ]],
+    ['提醒与通知', [
+        'client.extra.visualRange.enabled', 'client.extra.sessionTimeLimit.enabled', 'discord.enable'
+    ]]
+];
+
+const CFG_MODULE_NAMES = {
+    authentication: '账号认证', client: '客户端', debug: '调试', server: '服务端',
+    plugins: '插件', interactiveTerminal: '交互终端', inGameCommands: '游戏内命令',
+    theme: '主题配色', discord: 'Discord', database: '数据库', autoUpdater: '自动更新'
+};
+
+function cfgGetPath(obj, path) {
+    return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+
+function cfgSetPath(obj, path, val) {
+    const keys = path.split('.');
+    let o = obj;
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (typeof o[keys[i]] !== 'object' || o[keys[i]] === null) o[keys[i]] = {};
+        o = o[keys[i]];
+    }
+    o[keys[keys.length - 1]] = val;
+}
+
+function cfgIsSensitivePath(path) {
+    return CFG.masked.has(path);
+}
+
+function cfgIsScalar(v) {
+    return typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string';
+}
+
+function cfgLabel(path) {
+    const m = CFG.meta[path];
+    return m && m.label ? m.label : path.split('.').pop();
+}
+
+function cfgDesc(path) {
+    const m = CFG.meta[path];
+    return m && m.desc ? m.desc : '';
+}
+
+function cfgStatus(text, kind) {
+    const el = document.getElementById('cfgStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'cfg-status' + (kind ? ' cfg-status-' + kind : '');
+    el.style.display = text ? '' : 'none';
+}
+
+async function cfgEnter() {
+    if (CFG.loaded || CFG.loading) {
+        cfgUpdateDirtyBar();
+        return;
+    }
+    await cfgLoad();
+}
+
+async function cfgLoad() {
+    CFG.loading = true;
+    cfgStatus('正在读取配置...');
+    try {
+        const [metaRes, defaultRes, cfgRes] = await Promise.all([
+            fetch('config-meta.json', { credentials: 'include' }),
+            fetch('config-default.json', { credentials: 'include' }),
+            fetch(API_BASE + '/config', { credentials: 'include' })
+        ]);
+        if (!metaRes.ok || !defaultRes.ok) throw new Error('静态资源加载失败');
+        if (cfgRes.status === 401) { window.location.href = '/login.html'; return; }
+
+        CFG.meta = await metaRes.json();
+        CFG.defaults = await defaultRes.json();
+        const data = await cfgRes.json();
+        if (!data.success) throw new Error(data.error || '读取配置失败');
+
+        CFG.config = data.config;
+        CFG.mask = data.mask || '********';
+        CFG.masked = new Set(data.masked || []);
+        CFG.dirty = {};
+        CFG.loaded = true;
+
+        cfgRenderScenarios();
+        cfgRenderGroups('cfgRequiredFields', CFG_REQUIRED_GROUPS);
+        cfgRenderGroups('cfgMoreFields', CFG_MORE_GROUPS);
+        cfgRenderTree();
+        cfgUpdateDirtyBar();
+
+        const maskedNote = CFG.masked.size ? `，${CFG.masked.size} 个敏感字段已隐藏` : '';
+        cfgStatus(`已读取当前配置${maskedNote}。改动后点"保存"，写入运行内存；部分设置需重启 ZenithProxy 后生效。`, 'ok');
+    } catch (e) {
+        cfgStatus('读取配置失败：' + (e && e.message ? e.message : e), 'error');
+    } finally {
+        CFG.loading = false;
+    }
+}
+
+function cfgReload() {
+    CFG.loaded = false;
+    CFG.dirty = {};
+    cfgLoad();
+}
+
+function cfgRenderScenarios() {
+    const root = document.getElementById('cfgScenarios');
+    if (!root) return;
+    root.innerHTML = '';
+    CFG_SCENARIOS.forEach(sc => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'cfg-scenario';
+        card.innerHTML = '<span class="cfg-scenario-icon">' + sc.icon + '</span>' +
+            '<span class="cfg-scenario-name">' + sc.name + '</span>' +
+            '<span class="cfg-scenario-desc">' + sc.desc + '</span>';
+        card.addEventListener('click', () => cfgApplyScenario(sc));
+        root.appendChild(card);
+    });
+}
+
+function cfgApplyScenario(sc) {
+    Object.keys(sc.set).forEach(p => {
+        cfgSetPath(CFG.config, p, sc.set[p]);
+        CFG.dirty[p] = sc.set[p];
+    });
+    // 2b2t 定制项：2b2t 场景打开，其他场景关闭
+    const tune = sc.key === 'b2b2t' ? CFG_B2B2T_ON : CFG_B2B2T_OFF;
+    Object.keys(tune).forEach(p => {
+        cfgSetPath(CFG.config, p, tune[p]);
+        CFG.dirty[p] = tune[p];
+    });
+    cfgRenderGroups('cfgRequiredFields', CFG_REQUIRED_GROUPS);
+    cfgRenderGroups('cfgMoreFields', CFG_MORE_GROUPS);
+    cfgRenderTree();
+    cfgUpdateDirtyBar();
+    toast('已应用场景：' + sc.name + '，记得点保存', 'info');
+}
+
+/** 渲染一组「标题 + 字段路径列表」 */
+function cfgRenderGroups(containerId, groups) {
+    const root = document.getElementById(containerId);
+    if (!root) return;
+    root.innerHTML = '';
+    groups.forEach(([title, paths]) => {
+        const group = document.createElement('div');
+        group.className = 'cfg-group';
+        const h = document.createElement('div');
+        h.className = 'cfg-group-title';
+        h.textContent = title;
+        group.appendChild(h);
+        paths.forEach(p => {
+            const row = cfgBuildRow(p);
+            if (row) group.appendChild(row);
+        });
+        root.appendChild(group);
+    });
+}
+
+/** 为单个路径构建一行控件；路径不存在时返回提示行 */
+function cfgBuildRow(path) {
+    const value = cfgGetPath(CFG.config, path);
+    const row = document.createElement('div');
+    row.className = 'cfg-row';
+
+    const labelWrap = document.createElement('div');
+    labelWrap.className = 'cfg-label';
+    const name = document.createElement('span');
+    name.className = 'cfg-name';
+    name.textContent = cfgLabel(path);
+    const code = document.createElement('span');
+    code.className = 'cfg-path';
+    code.textContent = path;
+    labelWrap.appendChild(name);
+    labelWrap.appendChild(code);
+    const desc = cfgDesc(path);
+    if (desc) {
+        const d = document.createElement('span');
+        d.className = 'cfg-desc';
+        d.textContent = desc;
+        labelWrap.appendChild(d);
+    }
+    row.appendChild(labelWrap);
+
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'cfg-input';
+    inputWrap.appendChild(cfgBuildControl(path, value));
+    row.appendChild(inputWrap);
+    return row;
+}
+
+/** 按值类型生成控件；数组/对象/未知路径给只读提示 */
+function cfgBuildControl(path, value) {
+    if (value === undefined) {
+        const span = document.createElement('span');
+        span.className = 'cfg-readonly';
+        span.textContent = '当前配置中不存在该字段';
+        return span;
+    }
+    if (Array.isArray(value)) {
+        const span = document.createElement('span');
+        span.className = 'cfg-readonly';
+        span.textContent = '数组字段（' + value.length + ' 项），请在对应页面或 config.json 中编辑';
+        return span;
+    }
+    if (value !== null && typeof value === 'object') {
+        const span = document.createElement('span');
+        span.className = 'cfg-readonly';
+        span.textContent = '对象字段，请展开下方"全部字段"逐项编辑';
+        return span;
+    }
+
+    if (typeof value === 'boolean') {
+        const label = document.createElement('label');
+        label.className = 'toggle';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = value;
+        input.addEventListener('change', () => cfgOnChange(path, input.checked));
+        const slider = document.createElement('span');
+        slider.className = 'toggle-slider';
+        label.appendChild(input);
+        label.appendChild(slider);
+        return label;
+    }
+
+    const input = document.createElement('input');
+    if (typeof value === 'number') {
+        input.type = 'number';
+        input.step = Number.isInteger(value) ? '1' : 'any';
+        input.value = value;
+        input.addEventListener('change', () => {
+            const n = Number(input.value);
+            if (Number.isFinite(n)) cfgOnChange(path, n);
+            else input.value = cfgGetPath(CFG.config, path);
+        });
+    } else {
+        const sensitive = cfgIsSensitivePath(path);
+        input.type = sensitive ? 'password' : 'text';
+        input.value = value;
+        input.spellcheck = false;
+        if (sensitive) input.placeholder = '已隐藏，留空表示不修改';
+        input.addEventListener('change', () => cfgOnChange(path, input.value));
+    }
+    input.className = 'cfg-input-el';
+    return input;
+}
+
+function cfgOnChange(path, value) {
+    cfgSetPath(CFG.config, path, value);
+    CFG.dirty[path] = value;
+    cfgUpdateDirtyBar();
+}
+
+function cfgUpdateDirtyBar() {
+    const bar = document.getElementById('cfgDirtyBar');
+    const cnt = document.getElementById('cfgDirtyCount');
+    if (!bar || !cnt) return;
+    const n = Object.keys(CFG.dirty).length;
+    cnt.textContent = n + ' 项待保存';
+    bar.classList.toggle('visible', n > 0);
+}
+
+/** 全部字段：按顶层模块折叠，递归到叶子 */
+function cfgRenderTree() {
+    const root = document.getElementById('cfgTree');
+    if (!root || !CFG.config) return;
+    root.innerHTML = '';
+    Object.keys(CFG.config).forEach(key => {
+        if (key === 'warning' || key === 'deprecationWarning_26_1_2') return;
+        root.appendChild(cfgBuildBranch(key, CFG.config[key], key, 0));
+    });
+}
+
+function cfgBuildBranch(name, value, path, depth) {
+    const wrap = document.createElement('details');
+    wrap.className = 'cfg-branch';
+    if (depth === 0) wrap.open = false;
+
+    const summary = document.createElement('summary');
+    summary.className = 'cfg-branch-summary';
+    const moduleName = CFG_MODULE_NAMES[path];
+    summary.textContent = moduleName ? moduleName + ' · ' + name : name;
+    wrap.appendChild(summary);
+
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const keys = Object.keys(value);
+        if (keys.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'cfg-readonly cfg-branch-empty';
+            empty.textContent = '（空对象）';
+            wrap.appendChild(empty);
+        }
+        keys.forEach(k => {
+            const childPath = path + '.' + k;
+            const childValue = value[k];
+            if (childValue !== null && typeof childValue === 'object' && !Array.isArray(childValue)) {
+                wrap.appendChild(cfgBuildBranch(k, childValue, childPath, depth + 1));
+            } else {
+                wrap.appendChild(cfgBuildRow(childPath));
+            }
+        });
+    } else {
+        wrap.appendChild(cfgBuildRow(path));
+    }
+    return wrap;
+}
+
+async function cfgApply() {
+    const patch = CFG.dirty;
+    const n = Object.keys(patch).length;
+    if (n === 0) {
+        toast('没有改动需要保存', 'info');
+        return;
+    }
+    cfgStatus('正在保存 ' + n + ' 项改动...');
+    try {
+        const res = await fetch(API_BASE + '/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ patch })
+        });
+        if (res.status === 401) { window.location.href = '/login.html'; return; }
+        const data = await res.json();
+
+        if (data.success) {
+            CFG.dirty = {};
+            cfgUpdateDirtyBar();
+            const parts = ['已写入 ' + data.applied + ' 项'];
+            if (data.skipped && data.skipped.length) parts.push('跳过 ' + data.skipped.length + ' 项');
+            if (data.unchanged && data.unchanged.length) parts.push('敏感字段未改动 ' + data.unchanged.length + ' 项');
+            cfgStatus(parts.join('，') + '。' + (data.note || ''), 'ok');
+            toast('已写入 ' + data.applied + ' 项，重启后生效', 'success');
+            if (data.failed && data.failed.length) {
+                cfgStatus('部分字段写入失败：' + data.failed.join('; '), 'error');
+            }
+        } else {
+            const msg = (data.failed && data.failed.length)
+                ? data.failed.join('; ')
+                : (data.error || '保存失败');
+            cfgStatus('保存失败：' + msg, 'error');
+            toast('保存失败', 'error');
+        }
+    } catch (e) {
+        cfgStatus('保存失败：' + (e && e.message ? e.message : e), 'error');
+        toast('保存失败', 'error');
+    }
+}
+
+function cfgDiscard() {
+    CFG.dirty = {};
+    CFG.loaded = false;
+    cfgLoad();
+    toast('已放弃未保存的改动', 'info');
+}
+
+function cfgRestoreDefaults() {
+    if (!CFG.defaults) return;
+    if (!confirm('把表单恢复成 ZenithProxy 默认值？敏感字段（密码/令牌）不会被覆盖。')) return;
+    CFG.config = JSON.parse(JSON.stringify(CFG.defaults));
+    CFG.dirty = {};
+    // 只把"非敏感且确实不同"的字段标为待保存，避免误覆盖密码
+    cfgCollectLeaves(CFG.defaults, '', (path, val) => {
+        if (!cfgIsScalar(val)) return;
+        if (cfgIsSensitivePath(path)) return;
+        CFG.dirty[path] = val;
+    });
+    cfgRenderGroups('cfgRequiredFields', CFG_REQUIRED_GROUPS);
+    cfgRenderGroups('cfgMoreFields', CFG_MORE_GROUPS);
+    cfgRenderTree();
+    cfgUpdateDirtyBar();
+    cfgStatus('已载入默认值，' + Object.keys(CFG.dirty).length + ' 项待保存。敏感字段保持原值。', 'ok');
+}
+
+function cfgCollectLeaves(obj, prefix, cb) {
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+        if (prefix) cb(prefix, obj);
+        return;
+    }
+    Object.keys(obj).forEach(k => {
+        const p = prefix ? prefix + '.' + k : k;
+        cfgCollectLeaves(obj[k], p, cb);
+    });
+}
+
+function cfgDownload() {
+    if (!CFG.config) return;
+    const text = JSON.stringify(CFG.config, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'config.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const n = Object.keys(CFG.dirty).length;
+    toast(n > 0 ? ('已导出（含 ' + n + ' 项未保存改动）') : '已导出 config.json', 'success');
 }
