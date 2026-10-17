@@ -5,6 +5,7 @@ import com.zenith.webui.http.HttpHelper;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.util.CharsetUtil;
 
 import java.util.ArrayList;
@@ -94,6 +95,8 @@ public class WhitelistHandler {
             } catch (Exception e) {
                 HttpHelper.sendJson(ctx, Map.of("success", false, "error", "Whitelist operation failed"));
             }
+        } else {
+            HttpHelper.sendError(ctx, HttpResponseStatus.METHOD_NOT_ALLOWED, "Method Not Allowed");
         }
     }
 }

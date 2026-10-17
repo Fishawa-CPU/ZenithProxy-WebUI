@@ -12,11 +12,20 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class AuthManager {
     private static final ComponentLogger LOG = ComponentLogger.logger("WebUI-Auth");
+    /** Failed logins allowed per IP within one {@link #RATE_LIMIT_WINDOW_MS} window. */
     private static final int MAX_ATTEMPTS_PER_MINUTE = 5;
     private static final long RATE_LIMIT_WINDOW_MS = 60_000;
+
+    /**
+     * Global auth generation. Bumped whenever a token is revoked so per-channel
+     * auth caches (see {@link AuthHandler}) are invalidated immediately instead of
+     * surviving for the rest of their cache window.
+     */
+    private static final AtomicLong AUTH_EPOCH = new AtomicLong(0);
 
     private final WebUIConfig.AuthConfig config;
     private final Map<String, TokenInfo> tokens = new ConcurrentHashMap<>();
@@ -49,7 +58,8 @@ public class AuthManager {
     }
 
     /**
-     * Authenticate user with username and password, rate-limited by IP
+     * Authenticate user with username and password, rate-limited by IP.
+     * Only failed attempts count towards the limit.
      * @return token if successful, null otherwise
      */
     public String authenticate(String username, String password, String clientIp) {
@@ -57,20 +67,24 @@ public class AuthManager {
 
         // IP-based rate limiting (stale entries cleaned by background task)
         String rateKey = clientIp + ":" + (System.currentTimeMillis() / RATE_LIMIT_WINDOW_MS);
-        int attempts = rateLimitMap.compute(rateKey, (k, v) -> v == null ? 1 : v + 1);
-        if (attempts > MAX_ATTEMPTS_PER_MINUTE) {
+        Integer attempts = rateLimitMap.get(rateKey);
+        if (attempts != null && attempts >= MAX_ATTEMPTS_PER_MINUTE) {
             LOG.warn("Rate limit exceeded for IP: {}", clientIp);
             return null;
         }
 
-        // Constant-time comparison using pre-computed byte arrays
-        if (secureEquals(usernameBytes, username.getBytes(StandardCharsets.UTF_8))
-            && secureEquals(passwordBytes, password.getBytes(StandardCharsets.UTF_8))) {
+        // Constant-time comparison using pre-computed byte arrays. Both comparisons
+        // always run (bitwise &) so the username cannot be probed by timing.
+        boolean usernameOk = secureEquals(usernameBytes, username.getBytes(StandardCharsets.UTF_8));
+        boolean passwordOk = secureEquals(passwordBytes, password.getBytes(StandardCharsets.UTF_8));
+        if (usernameOk & passwordOk) {
+            rateLimitMap.remove(rateKey); // successful login clears the failure counter
             String token = generateToken(username);
             LOG.info("User authenticated: {}", username);
             return token;
         }
 
+        rateLimitMap.merge(rateKey, 1, Integer::sum);
         LOG.warn("Authentication failed for user: {} from IP: {}", username, clientIp);
         return null;
     }
@@ -118,6 +132,7 @@ public class AuthManager {
         if (token == null) return;
         tokens.remove(token);
         cleanupTokenChannel(token);
+        AUTH_EPOCH.incrementAndGet();
     }
 
     /**
@@ -133,7 +148,13 @@ public class AuthManager {
             }
             return false;
         });
+        AUTH_EPOCH.incrementAndGet();
         LOG.info("All tokens invalidated for user: {}", username);
+    }
+
+    /** Current auth generation — per-channel auth caches compare against this. */
+    static long epoch() {
+        return AUTH_EPOCH.get();
     }
 
     private static boolean secureEquals(byte[] a, byte[] b) {

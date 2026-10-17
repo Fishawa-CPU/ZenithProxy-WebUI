@@ -23,6 +23,8 @@ public class AuthHandler {
 
     /** Per-channel auth cache: avoids re-validating token on every request over the same TCP connection. */
     private static final AttributeKey<Long> AUTH_CACHE_KEY = AttributeKey.valueOf("webui_auth_ts");
+    /** Auth generation the cached result belongs to — bumped on logout/password change. */
+    private static final AttributeKey<Long> AUTH_EPOCH_KEY = AttributeKey.valueOf("webui_auth_epoch");
     /** Re-validate token at most once per cache window (30s). Zero cost for bursts of requests. */
     private static final long AUTH_CACHE_MS = 30_000;
 
@@ -67,17 +69,21 @@ public class AuthHandler {
         }
 
         // Per-channel auth cache: skip validation if recently authenticated on this TCP channel
+        // AND no token has been revoked since (logout / password change bumps the epoch).
         Channel ch = ctx.channel();
         Long cachedTs = ch.attr(AUTH_CACHE_KEY).get();
+        Long cachedEpoch = ch.attr(AUTH_EPOCH_KEY).get();
         long now = System.currentTimeMillis();
-        if (cachedTs != null && (now - cachedTs) < AUTH_CACHE_MS) {
+        long currentEpoch = AuthManager.epoch();
+        if (cachedTs != null && cachedEpoch != null && cachedEpoch == currentEpoch
+            && (now - cachedTs) < AUTH_CACHE_MS) {
             return true;
         }
 
         // Extract token from cookie or header
         String token = extractToken(request);
         if (token == null) {
-            ch.attr(AUTH_CACHE_KEY).set(null);
+            clearCache(ch);
             return false;
         }
 
@@ -85,10 +91,16 @@ public class AuthHandler {
         String username = authManager.validateToken(token);
         if (username != null) {
             ch.attr(AUTH_CACHE_KEY).set(now);
+            ch.attr(AUTH_EPOCH_KEY).set(currentEpoch);
             return true;
         }
-        ch.attr(AUTH_CACHE_KEY).set(null);
+        clearCache(ch);
         return false;
+    }
+
+    private static void clearCache(Channel channel) {
+        channel.attr(AUTH_CACHE_KEY).set(null);
+        channel.attr(AUTH_EPOCH_KEY).set(null);
     }
 
     /**

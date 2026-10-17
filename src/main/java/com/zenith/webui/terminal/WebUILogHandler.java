@@ -17,7 +17,8 @@ public class WebUILogHandler extends UnsynchronizedAppenderBase<ILoggingEvent> {
     private static final String[] IGNORED_PREFIXES = {
         "com.sun.net.httpserver",
         "jdk.httpserver",
-        "com.zenith.webui.auth"      // Auth events contain sensitive data (username, IP)
+        "com.zenith.webui.auth",     // Auth events contain sensitive data (username, IP)
+        "WebUI-Auth"                 // AuthManager logger — same reason
     };
 
     @Override

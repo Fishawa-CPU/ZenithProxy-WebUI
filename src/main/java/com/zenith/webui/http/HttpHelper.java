@@ -2,7 +2,6 @@ package com.zenith.webui.http;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -12,81 +11,60 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * HTTP response utility methods. Stateless, shared by all handlers.
+ * <p>
+ * Every JSON payload — including SSE frames — is produced by Gson.
+ * No response body is assembled by hand.
  */
 public final class HttpHelper {
     private HttpHelper() {}
 
-    /** Shared Gson instance (disableHtmlEscaping for clean output). */
+    /** Shared Gson instance used for all JSON responses. */
     public static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
-    public static void sendJson(ChannelHandlerContext ctx, Object obj) {
-        byte[] bytes = GSON.toJson(obj).getBytes(StandardCharsets.UTF_8);
-        ByteBuf buf = Unpooled.wrappedBuffer(bytes);
-        HttpResponse httpResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-        httpResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
-        httpResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        httpResponse.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        ctx.write(httpResponse);
-        ctx.write(new DefaultHttpContent(buf));
-        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-    }
-
-    /** Send a pre-built JSON string as response, bypassing Gson serialization. */
-    public static void sendJsonString(ChannelHandlerContext ctx, String json) {
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-        ByteBuf buf = Unpooled.wrappedBuffer(bytes);
-        HttpResponse httpResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-        httpResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
-        httpResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        httpResponse.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        ctx.write(httpResponse);
-        ctx.write(new DefaultHttpContent(buf));
-        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-    }
-
     /**
-     * Append {@code s} to {@code sb}, escaping JSON control characters.
-     * Inline (no allocation) for strings that contain no special chars.
+     * Gson variant that keeps {@code null} fields. The dashboard payload relies on
+     * explicit nulls (e.g. {@code player.health} when the bot is offline), which the
+     * default Gson would silently drop.
      */
-    public static void escapeJson(StringBuilder sb, String s) {
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"':  sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\b': sb.append("\\b");  break;
-                case '\f': sb.append("\\f");  break;
-                case '\n': sb.append("\\n");  break;
-                case '\r': sb.append("\\r");  break;
-                case '\t': sb.append("\\t");  break;
-                default:
-                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-                    else sb.append(c);
-            }
-        }
+    public static final Gson GSON_NULLS = new GsonBuilder()
+        .disableHtmlEscaping()
+        .serializeNulls()
+        .create();
+
+    private static final String CONTENT_TYPE_JSON = "application/json; charset=utf-8";
+    private static final String CONTENT_TYPE_TEXT = "text/plain; charset=utf-8";
+
+    public static void sendJson(ChannelHandlerContext ctx, Object obj) {
+        sendJson(ctx, obj, GSON);
+    }
+
+    public static void sendJson(ChannelHandlerContext ctx, Object obj, Gson gson) {
+        writeBody(ctx, HttpResponseStatus.OK, gson.toJson(obj).getBytes(StandardCharsets.UTF_8),
+            CONTENT_TYPE_JSON);
+    }
+
+    /** Serialize {@code payload} into a complete Server-Sent Events frame ("data: {...}\n\n"). */
+    public static String sseFrame(Object payload) {
+        return sseFrame(payload, GSON);
+    }
+
+    /** SSE frame built with a specific Gson configuration (e.g. {@link #GSON_NULLS}). */
+    public static String sseFrame(Object payload, Gson gson) {
+        return "data: " + gson.toJson(payload) + "\n\n";
     }
 
     public static void sendBytes(ChannelHandlerContext ctx, byte[] content, String contentType) {
-        ByteBuf buf = Unpooled.wrappedBuffer(content);
-        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
-        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.length);
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        ctx.write(response);
-        ctx.write(new DefaultHttpContent(buf));
-        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+        writeBody(ctx, HttpResponseStatus.OK, content, contentType);
     }
 
     public static void sendNotFound(ChannelHandlerContext ctx) {
-        String notFound = "404 Not Found";
-        ByteBuf buf = Unpooled.copiedBuffer(notFound, io.netty.util.CharsetUtil.UTF_8);
-        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.NOT_FOUND);
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain");
-        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, buf.readableBytes());
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        ctx.write(response);
-        ctx.write(new DefaultHttpContent(buf));
-        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+        writeBody(ctx, HttpResponseStatus.NOT_FOUND,
+            "404 Not Found".getBytes(StandardCharsets.UTF_8), CONTENT_TYPE_TEXT);
+    }
+
+    /** Send a plain-text status response (405 Method Not Allowed and friends). */
+    public static void sendError(ChannelHandlerContext ctx, HttpResponseStatus status, String message) {
+        writeBody(ctx, status, message.getBytes(StandardCharsets.UTF_8), CONTENT_TYPE_TEXT);
     }
 
     public static void sendCorsResponse(ChannelHandlerContext ctx) {
@@ -100,12 +78,23 @@ public final class HttpHelper {
     }
 
     public static String getContentType(String path) {
-        if (path.endsWith(".html")) return "text/html";
-        if (path.endsWith(".css")) return "text/css";
-        if (path.endsWith(".js")) return "application/javascript";
-        if (path.endsWith(".json")) return "application/json";
+        if (path.endsWith(".html")) return "text/html; charset=utf-8";
+        if (path.endsWith(".css")) return "text/css; charset=utf-8";
+        if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
+        if (path.endsWith(".json")) return CONTENT_TYPE_JSON;
         if (path.endsWith(".png")) return "image/png";
         if (path.endsWith(".svg")) return "image/svg+xml";
         return "application/octet-stream";
+    }
+
+    private static void writeBody(ChannelHandlerContext ctx, HttpResponseStatus status,
+                                  byte[] body, String contentType) {
+        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
+        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
+        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        ctx.write(response);
+        ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(body)));
+        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
     }
 }

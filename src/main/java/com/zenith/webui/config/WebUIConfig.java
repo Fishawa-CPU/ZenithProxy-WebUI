@@ -2,6 +2,8 @@ package com.zenith.webui.config;
 
 public class WebUIConfig {
     public int port = 8080;
+    /** Whether the HTTP server starts automatically on plugin load. */
+    public boolean enabled = true;
 
     // Authentication settings
     public AuthConfig auth = new AuthConfig();
@@ -11,7 +13,9 @@ public class WebUIConfig {
     public static class AuthConfig {
         public boolean enabled = true;
         public String username = "admin";
-        public String password = "admin";
+        // Intentionally blank: ConfigManager generates a random password on first run.
+        // Defaulting to a well-known value would silently ship an admin/admin instance.
+        public String password = "";
         public long tokenExpiry = 24 * 60 * 60 * 1000; // 24 hours
 
         public AuthConfig() {}

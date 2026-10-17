@@ -96,7 +96,14 @@ public class WebUIChannelHandler extends SimpleChannelInboundHandler<FullHttpReq
                 case "/api/dashboard" -> dashboardHandler.handleDashboard(ctx);
                 case "/api/dashboard/stream" -> dashboardHandler.handleDashboardStream(ctx);
                 case "/api/whitelist" -> whitelistHandler.handleWhitelist(ctx, req);
-                default -> staticFileHandler.handleStaticFile(ctx, path);
+                default -> {
+                    if (path.startsWith("/api/")) {
+                        // Unknown API route: returning index.html would look like a success
+                        com.zenith.webui.http.HttpHelper.sendNotFound(ctx);
+                    } else {
+                        staticFileHandler.handleStaticFile(ctx, path);
+                    }
+                }
             }
         } catch (Exception e) {
             com.zenith.webui.http.HttpHelper.sendJson(ctx, Map.of("error", "Internal server error"));

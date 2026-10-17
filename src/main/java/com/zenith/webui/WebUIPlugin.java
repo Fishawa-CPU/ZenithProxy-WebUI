@@ -1,5 +1,6 @@
 package com.zenith.webui;
 
+import com.google.gson.JsonObject;
 import com.zenith.event.chat.*;
 import com.zenith.event.client.ClientConnectEvent;
 import com.zenith.event.client.ClientDisconnectEvent;
@@ -18,6 +19,7 @@ import com.zenith.webui.auth.AuthManager;
 import com.zenith.webui.command.WebUICommand;
 import com.zenith.webui.config.ConfigManager;
 import com.zenith.webui.http.HttpHelper;
+import com.zenith.webui.terminal.LogEntry;
 import com.zenith.webui.terminal.LogTranslator;
 import com.zenith.webui.terminal.WebUILogHandler;
 import com.zenith.webui.queue.QueueParser;
@@ -43,7 +45,6 @@ import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundH
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -62,7 +63,7 @@ import static com.zenith.Globals.*;
  * server/      — Netty HTTP server bootstrap + channel request routing
  * http/        — Static HTTP response helpers + shared Gson instance
  * api/         — Endpoint handlers: commands, dashboard, log-stream, whitelist
- * log/         — Log message translation + Logback SSE appender
+ * log/ (terminal/) — Log message translation + Logback SSE appender
  * staticfile/  — Static file serving with bounded file cache
  * command/     — /webui enable|disable|status command
  * auth/        — Token-based auth (login/logout/status, cookie + Bearer)
@@ -78,8 +79,8 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     public static volatile WebUIPlugin instance;
 
     // ── Shared mutable state (accessed cross-package) ─────────
-    static final int LOG_BUFFER_MAX = 500;
-    public static final ConcurrentLinkedDeque<Map<String, Object>> logBuffer = new ConcurrentLinkedDeque<>();
+    public static final int LOG_BUFFER_MAX = 500;
+    public static final ConcurrentLinkedDeque<LogEntry> logBuffer = new ConcurrentLinkedDeque<>();
     static final AtomicLong logPollCounter = new AtomicLong(0);
     /** Approximate log buffer size counter — avoids O(n) {@code ConcurrentLinkedDeque.size()}. */
     public static final AtomicInteger logBufferApproxSize = new AtomicInteger(0);
@@ -144,9 +145,13 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             this::start, this::stop, () -> server != null && server.isRunning(), port));
 
         // Go
-        boolean ok = start();
-        LOG.info("WebUI plugin loaded!{}",
-            ok ? " Access at http://localhost:" + port : " (server failed to start, check logs)");
+        if (configManager.getConfig().enabled) {
+            boolean ok = start();
+            LOG.info("WebUI plugin loaded!{}",
+                ok ? " Access at http://localhost:" + port : " (server failed to start, check logs)");
+        } else {
+            LOG.info("WebUI plugin loaded but disabled in plugins/webui/config.json — use /webui enable to start");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -156,6 +161,9 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     /** Full start: server → packet handlers → log appender → events → dashboard stream. */
     public boolean start() {
         instance = this;
+        // Idempotent: re-running would register duplicate packet codecs, log appenders
+        // and event subscribers, so bail out while the server is already up.
+        if (server != null && server.isRunning()) return true;
         if (!server.start()) return false;
 
         AuthBypasserState.update(configManager.getConfig().authBypasser);
@@ -166,13 +174,14 @@ public class WebUIPlugin implements ZenithProxyPlugin {
         return true;
     }
 
-    /** Full stop: events → dashboard stream → log appender → server. */
+    /** Stop the server and detach every runtime hook. Safe to call repeatedly. */
     public void stop() {
         EVENT_BUS.unsubscribe(this);
-        dashboardHandler.stopStream();
+        if (dashboardHandler != null) dashboardHandler.stopStream();
         detachLogAppender();
-        server.stop();
-        if (authManager != null) authManager.shutdown();
+        if (server != null) server.stop();
+        // The auth manager outlives stop()/start(): it owns the token store, and
+        // its cleanup task is a daemon thread. Shutting it down would break re-enable.
         instance = null;
     }
 
@@ -296,39 +305,29 @@ public class WebUIPlugin implements ZenithProxyPlugin {
 
     /** Called by {@link WebUILogHandler} and event subscribers. */
     public void broadcastLog(String level, String logger, String message) {
-        message = LogTranslator.translate(message);
-        long ts = System.currentTimeMillis();
+        LogEntry entry = new LogEntry(
+            level, logger, LogTranslator.translate(message),
+            System.currentTimeMillis(), logPollCounter.getAndIncrement());
+        // Gson produces the SSE payload — one serialization serves every client.
+        String sseFrame = HttpHelper.sseFrame(entry);
 
-        // Manual JSON serialization + SSE frame in one pass — avoids Gson/JsonObject allocation
-        String sseFrame = buildSseFrame(level, logger, message, ts);
-
-        Map<String, Object> entry = Map.of(
-            "level", level, "logger", logger, "message", message,
-            "timestamp", ts, "id", logPollCounter.getAndIncrement(),
-            "sseFrame", sseFrame);
         logBuffer.addLast(entry);
         // Use counter instead of O(n) ConcurrentLinkedDeque.size()
         if (logBufferApproxSize.incrementAndGet() > LOG_BUFFER_MAX) {
-            logBuffer.pollFirst();
-            logBufferApproxSize.decrementAndGet();
+            if (logBuffer.pollFirst() != null) logBufferApproxSize.decrementAndGet();
         }
         broadcastSSE(sseClients, sseFrame);
     }
 
     /** Push a title packet to log-stream SSE clients. Called by {@link TitlePacketHandler}. */
     public static void pushTitle(String text) {
-        StringBuilder sb = new StringBuilder(64 + text.length());
-        sb.append("data: {\"type\":\"title\",\"text\":\"");
-        escapeJson(sb, text);
-        sb.append("\"}\n\n");
-        broadcastSSE(sseClients, sb.toString());
+        if (text == null || text.isEmpty()) return;
+        JsonObject payload = new JsonObject();
+        payload.addProperty("type", "title");
+        payload.addProperty("text", text);
+        broadcastSSE(sseClients, HttpHelper.sseFrame(payload));
     }
 
-    /**
-     * Write a pre-built SSE data frame to every active channel in {@code clients}.
-     * Uses retainedDuplicate to avoid per-channel ByteBuf allocation.
-     * @param sseFrame pre-built SSE frame string (format: "data: {...}\n\n")
-     */
     /**
      * Write a pre-built SSE data frame to every active channel in {@code clients}.
      * Collects dead channels for batch removal — avoids CopyOnWriteArrayList.removeIf
@@ -355,36 +354,5 @@ public class WebUIPlugin implements ZenithProxyPlugin {
             clients.removeAll(dead);
         }
         template.release();
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  JSON/SSE helpers (zero-allocation serialization)
-    // ═══════════════════════════════════════════════════════════
-
-    /** Build an SSE data frame with manual JSON serialization to avoid Gson/JsonObject allocation. */
-    private static String buildSseFrame(String level, String logger, String message, long ts) {
-        StringBuilder sb = new StringBuilder(256);
-        sb.append("data: {\"level\":\"");
-        escapeJson(sb, level);
-        sb.append("\",\"logger\":\"");
-        escapeJson(sb, logger);
-        sb.append("\",\"message\":\"");
-        escapeJson(sb, message);
-        sb.append("\",\"timestamp\":").append(ts).append("}\n\n");
-        return sb.toString();
-    }
-
-    /** Minimal JSON string escaping — handles characters that break JSON strings. */
-    private static void escapeJson(StringBuilder sb, String s) {
-        for (int i = 0, len = s.length(); i < len; i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"':  sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\n': sb.append("\\n"); break;
-                case '\r': sb.append("\\r"); break;
-                default:   sb.append(c);
-            }
-        }
     }
 }

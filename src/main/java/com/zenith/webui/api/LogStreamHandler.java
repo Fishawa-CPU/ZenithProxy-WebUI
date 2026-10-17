@@ -1,13 +1,18 @@
 package com.zenith.webui.api;
 
 import com.zenith.webui.WebUIPlugin;
+import com.zenith.webui.http.HttpHelper;
+import com.zenith.webui.terminal.LogEntry;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.DefaultHttpContent;
+import io.netty.handler.codec.http.DefaultHttpResponse;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
-
-import java.util.Map;
 
 /**
  * Handles /api/logs/stream — Server-Sent Events stream of log messages.
@@ -22,14 +27,12 @@ public class LogStreamHandler {
         response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         ctx.writeAndFlush(response);
 
-        // Push recent history using pre-serialized SSE frames (no re-serialization)
-        // Use approximate size to avoid O(n) ConcurrentLinkedDeque.size() traversal
-        StringBuilder sb = new StringBuilder(WebUIPlugin.logBufferApproxSize.get() * 128);
-        for (Map<String, Object> entry : WebUIPlugin.logBuffer) {
-            String sseFrame = (String) entry.get("sseFrame");
-            if (sseFrame != null) {
-                sb.append(sseFrame);
-            }
+        // Replay recent history. Each entry is serialized by Gson at connect time —
+        // the buffer stores plain objects, never pre-baked JSON strings.
+        int historySize = Math.min(WebUIPlugin.logBufferApproxSize.get(), WebUIPlugin.LOG_BUFFER_MAX);
+        StringBuilder sb = new StringBuilder(Math.max(historySize, 0) * 160);
+        for (LogEntry entry : WebUIPlugin.logBuffer) {
+            sb.append(HttpHelper.sseFrame(entry));
         }
         if (sb.length() > 0) {
             try {

@@ -8,7 +8,11 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.DefaultHttpResponse;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
 
 import java.nio.file.Files;
@@ -20,11 +24,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static com.zenith.Globals.*;
+import static com.zenith.Globals.CACHE;
+import static com.zenith.Globals.CONFIG;
+import static com.zenith.Globals.MC_VERSION;
 
 /**
  * Handles /api/dashboard and /api/dashboard/stream endpoints.
- * Builds aggregated proxy status data and pushes it via SSE.
+ * Builds the aggregated dashboard payload as a POJO and lets Gson serialize it.
  */
 public class DashboardHandler {
     private ScheduledExecutorService streamExecutor;
@@ -37,7 +43,7 @@ public class DashboardHandler {
     }
 
     public void handleDashboard(ChannelHandlerContext ctx) {
-        HttpHelper.sendJsonString(ctx, buildDashboardJson());
+        HttpHelper.sendJson(ctx, buildDashboardData(), HttpHelper.GSON_NULLS);
     }
 
     public void handleDashboardStream(ChannelHandlerContext ctx) {
@@ -78,8 +84,7 @@ public class DashboardHandler {
      * (see {@link com.zenith.webui.auth.AuthManager#invalidateToken}).
      */
     private void pushDashboardHeartbeat() {
-        String json = buildDashboardJson();
-        String frame = "data: " + json + "\n\n";
+        String frame = HttpHelper.sseFrame(buildDashboardData(), HttpHelper.GSON_NULLS);
         // Use retainedDuplicate pattern — one allocation for all clients (same as broadcastSSE)
         ByteBuf template = Unpooled.copiedBuffer(frame, CharsetUtil.UTF_8);
         try {
@@ -90,7 +95,7 @@ public class DashboardHandler {
                     continue;
                 }
                 try {
-                    ch.writeAndFlush(new DefaultHttpContent(template.retainedDuplicate()))
+                    ch.writeAndFlush(new io.netty.handler.codec.http.DefaultHttpContent(template.retainedDuplicate()))
                         .addListener(f -> { if (!f.isSuccess()) ch.close(); });
                 } catch (Exception e) {
                     ch.close();
@@ -106,50 +111,113 @@ public class DashboardHandler {
     }
 
     /**
-     * Build the dashboard JSON string directly, bypassing Gson and intermediate
-     * Map/List allocations. Called every second by the SSE heartbeat — zero
-     * allocation on the serialization path (only the data-fetching part creates
-     * transient objects that are GC-able immediately).
+     * Snapshot the proxy state into a {@link DashboardData} POJO. Each section is
+     * guarded individually so a failing subsystem degrades one field group instead
+     * of breaking the whole payload.
      */
-    private String buildDashboardJson() {
-        StringBuilder sb = new StringBuilder(512);
-        sb.append('{');
+    private DashboardData buildDashboardData() {
+        DashboardData data = new DashboardData();
+
+        Proxy proxy = Proxy.getInstance();
+
         // --- Status ---
-        sb.append("\"connected\":").append(Proxy.getInstance().isConnected()).append(',');
+        if (proxy != null) {
+            try {
+                data.connected = proxy.isConnected();
+                data.uptime = Math.max(0L, System.currentTimeMillis() - proxy.getStartTime());
+            } catch (Exception ignored) {}
+        }
+
         QueueData qd = getQueueData();
-        sb.append("\"inQueue\":").append(qd.inQueue).append(',');
-        sb.append("\"queuePosition\":").append(qd.position).append(',');
-        sb.append("\"queueOnlinePlayers\":").append(qd.onlinePlayers).append(',');
-        sb.append("\"queuePos\":\""); HttpHelper.escapeJson(sb, qd.queuePos); sb.append("\",");
-        sb.append("\"version\":\""); HttpHelper.escapeJson(sb, MC_VERSION); sb.append("\",");
-        String viaVersionStr = "";
+        data.inQueue = qd.inQueue;
+        data.queuePosition = qd.position;
+        data.queueOnlinePlayers = qd.onlinePlayers;
+        data.queuePos = qd.queuePos != null ? qd.queuePos : "";
+        data.version = MC_VERSION != null ? MC_VERSION : "";
+
         try {
-            var client = Proxy.getInstance().getClient();
+            var client = proxy != null ? proxy.getClient() : null;
             if (client != null && client.isConnected()) {
                 var protoVer = client.getProtocolVersion();
-                if (protoVer != null) viaVersionStr = "via " + protoVer.getName();
+                if (protoVer != null) data.viaVersion = "via " + protoVer.getName();
             }
         } catch (Exception ignored) {}
-        sb.append("\"viaVersion\":\""); HttpHelper.escapeJson(sb, viaVersionStr); sb.append("\",");
-        sb.append("\"username\":\""); HttpHelper.escapeJson(sb, CONFIG.authentication.username); sb.append("\",");
-        sb.append("\"proxyAddress\":\""); HttpHelper.escapeJson(sb, CONFIG.server.getProxyAddress()); sb.append("\",");
-        sb.append("\"uptime\":").append(System.currentTimeMillis() - Proxy.getInstance().getStartTime()).append(',');
+
+        data.username = CONFIG.authentication.username != null ? CONFIG.authentication.username : "";
+        String proxyAddress = CONFIG.server.getProxyAddress();
+        data.proxyAddress = proxyAddress != null ? proxyAddress : "";
 
         // --- System ---
-        sb.append("\"system\":{");
         double cpuLoad = -1;
         try {
             java.lang.management.OperatingSystemMXBean osBean =
                 java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-            cpuLoad = osBean.getSystemLoadAverage();
-            if (cpuLoad >= 0) cpuLoad = Math.round(cpuLoad * 100.0) / 100.0;
+            double load = osBean.getSystemLoadAverage();
+            if (load >= 0 && Double.isFinite(load)) cpuLoad = round2(load);
         } catch (Exception ignored) {}
-        sb.append("\"cpuLoad\":").append(cpuLoad).append(',');
+        data.system.cpuLoad = cpuLoad;
+
         Runtime rt = Runtime.getRuntime();
         long usedMem = rt.totalMemory() - rt.freeMemory();
-        sb.append("\"memoryPercent\":").append(Math.round(usedMem * 10000.0 / rt.maxMemory()) / 100.0).append(',');
+        long maxMem = rt.maxMemory();
+        data.system.memoryPercent = maxMem > 0 ? round2(usedMem * 100.0 / maxMem) : 0;
+
         long now = System.currentTimeMillis();
-        long totalBytesIn = 0, totalBytesOut = 0;
+        long[] totals = readNetworkTotals();
+        long totalIn = totals[0];
+        long totalOut = totals[1];
+        long prevTime = lastNetTime.getAndSet(now);
+        long prevIn = lastBytesIn.getAndSet(totalIn);
+        long prevOut = lastBytesOut.getAndSet(totalOut);
+        if (prevTime > 0) {
+            double elapsed = (now - prevTime) / 1000.0;
+            // Guard against interface counters resetting (e.g. adapter reconnect)
+            if (elapsed > 0 && totalIn >= prevIn && totalOut >= prevOut) {
+                data.system.netBytesPerSecIn = round1((totalIn - prevIn) / elapsed);
+                data.system.netBytesPerSecOut = round1((totalOut - prevOut) / elapsed);
+            }
+        }
+
+        // --- Latency ---
+        try {
+            var client = proxy != null ? proxy.getClient() : null;
+            boolean clientConnected = client != null && client.isConnected();
+            data.latency.botLatency = clientConnected ? client.getPing() : -1;
+            for (var session : proxy.getActiveConnections().getArray()) {
+                if (session != null) {
+                    data.latency.players.add(
+                        new DashboardData.PlayerPing(session.getName(), session.getPing()));
+                }
+            }
+        } catch (Exception ignored) {
+            data.latency = new DashboardData.LatencyInfo();
+        }
+
+        // --- Player ---
+        try {
+            var client = proxy != null ? proxy.getClient() : null;
+            boolean clientConnected = client != null && client.isConnected();
+            data.player.connected = clientConnected;
+            if (clientConnected) {
+                var thePlayer = CACHE.getPlayerCache().getThePlayer();
+                if (thePlayer != null) {
+                    data.player.health = thePlayer.getHealth();
+                    data.player.food = thePlayer.getFood();
+                }
+            }
+        } catch (Exception ignored) {
+            data.player = new DashboardData.PlayerInfo();
+        }
+
+        return data;
+    }
+
+    /**
+     * Read total RX/TX byte counters from /proc/net/dev.
+     * Returns {@code {0, 0}} on platforms without procfs (Windows/macOS).
+     */
+    private static long[] readNetworkTotals() {
+        long totalIn = 0, totalOut = 0;
         try {
             List<String> lines = Files.readAllLines(Path.of("/proc/net/dev"));
             for (String line : lines) {
@@ -159,73 +227,22 @@ public class DashboardHandler {
                     if (parts.length >= 2) {
                         String[] stats = parts[1].trim().split("\\s+");
                         if (stats.length >= 10) {
-                            totalBytesIn += Long.parseLong(stats[0]);
-                            totalBytesOut += Long.parseLong(stats[8]);
+                            totalIn += Long.parseLong(stats[0]);
+                            totalOut += Long.parseLong(stats[8]);
                         }
                     }
                 }
             }
         } catch (Exception ignored) {}
-        double bytesPerSecIn = 0, bytesPerSecOut = 0;
-        long prevTime = lastNetTime.getAndSet(now);
-        if (prevTime > 0) {
-            double elapsed = (now - prevTime) / 1000.0;
-            if (elapsed > 0) {
-                long prevBytesIn = lastBytesIn.getAndSet(totalBytesIn);
-                long prevBytesOut = lastBytesOut.getAndSet(totalBytesOut);
-                bytesPerSecIn = Math.round((totalBytesIn - prevBytesIn) / elapsed * 10.0) / 10.0;
-                bytesPerSecOut = Math.round((totalBytesOut - prevBytesOut) / elapsed * 10.0) / 10.0;
-            }
-        } else {
-            lastBytesIn.set(totalBytesIn);
-            lastBytesOut.set(totalBytesOut);
-        }
-        sb.append("\"netBytesPerSecIn\":").append(bytesPerSecIn).append(',');
-        sb.append("\"netBytesPerSecOut\":").append(bytesPerSecOut).append("},");
+        return new long[]{totalIn, totalOut};
+    }
 
-        // --- Latency ---
-        sb.append("\"latency\":{");
-        try {
-            var client = Proxy.getInstance().getClient();
-            boolean lc = client != null && client.isConnected();
-            sb.append("\"botLatency\":").append(lc ? client.getPing() : -1).append(",\"players\":[");
-            boolean first = true;
-            for (var session : Proxy.getInstance().getActiveConnections().getArray()) {
-                if (!first) sb.append(',');
-                first = false;
-                sb.append("{\"name\":\""); HttpHelper.escapeJson(sb, session.getName());
-                sb.append("\",\"ping\":").append(session.getPing()).append('}');
-            }
-            sb.append(']');
-        } catch (Exception e) {
-            sb.append("\"botLatency\":-1,\"players\":[]");
-        }
-        sb.append("},");
+    private static double round1(double value) {
+        return Double.isFinite(value) ? Math.round(value * 10.0) / 10.0 : 0;
+    }
 
-        // --- Player ---
-        sb.append("\"player\":{");
-        try {
-            var client = Proxy.getInstance().getClient();
-            boolean pc = client != null && client.isConnected();
-            sb.append("\"connected\":").append(pc);
-            if (pc) {
-                var thePlayer = CACHE.getPlayerCache().getThePlayer();
-                sb.append(",\"health\":");
-                if (thePlayer != null) sb.append(thePlayer.getHealth());
-                else sb.append("null");
-                sb.append(",\"food\":");
-                if (thePlayer != null) sb.append(thePlayer.getFood());
-                else sb.append("null");
-            } else {
-                sb.append(",\"health\":null,\"food\":null");
-            }
-        } catch (Exception e) {
-            sb.append("\"connected\":false,\"health\":null,\"food\":null");
-        }
-        sb.append('}');
-
-        sb.append('}');
-        return sb.toString();
+    private static double round2(double value) {
+        return Double.isFinite(value) ? Math.round(value * 100.0) / 100.0 : 0;
     }
 
     private record QueueData(boolean inQueue, int position, int onlinePlayers, String queuePos) {}
@@ -241,7 +258,7 @@ public class DashboardHandler {
         if (serverLower.contains("3c3u.org")) {
             return new QueueData(
                 QueueParser.is3cQueue(),
-                QueueParser.positionInQueue > 0 ? QueueParser.positionInQueue : 0,
+                Math.max(QueueParser.positionInQueue, 0),
                 QueueParser.onlinePlayers,
                 QueueParser.queuePos
             );

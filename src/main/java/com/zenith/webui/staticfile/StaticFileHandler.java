@@ -41,7 +41,7 @@ public class StaticFileHandler {
     private final Path webDir;
 
     public StaticFileHandler(Path configDir) {
-        this.webDir = configDir.resolve("web");
+        this.webDir = configDir.resolve("web").toAbsolutePath().normalize();
     }
 
     public void handleStaticFile(ChannelHandlerContext ctx, String path) {
@@ -54,7 +54,7 @@ public class StaticFileHandler {
 
         byte[] content = loadResourceCached(path);
         if (content == null) {
-            content = loadFile(webDir.resolve(path.substring(1)));
+            content = loadWebDirFile(path);
         }
 
         if (content != null) {
@@ -63,14 +63,28 @@ public class StaticFileHandler {
             // SPA fallback
             content = loadResourceCached("/index.html");
             if (content == null) {
-                content = loadFile(webDir.resolve("index.html"));
+                content = loadWebDirFile("/index.html");
             }
             if (content != null) {
-                HttpHelper.sendBytes(ctx, content, "text/html");
+                HttpHelper.sendBytes(ctx, content, "text/html; charset=utf-8");
             } else {
                 HttpHelper.sendNotFound(ctx);
             }
         }
+    }
+
+    /**
+     * Resolve a URL path inside the plugin's web directory.
+     * {@code isSafePath} already rejects {@code ..}, but an absolute Windows path
+     * such as {@code /C:/Windows/win.ini} would still escape through
+     * {@link Path#resolve}; the containment check below closes that hole.
+     */
+    private byte[] loadWebDirFile(String urlPath) {
+        Path candidate = webDir.resolve(urlPath.substring(1)).normalize();
+        if (!candidate.startsWith(webDir)) {
+            return null;
+        }
+        return loadFile(candidate);
     }
 
     /** Cached wrapper around classpath resource loading. */
