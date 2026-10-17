@@ -1,7 +1,12 @@
 # ZenithProxy Web UI
 
 [![Build](https://github.com/wxh1024/ZenithProxy-WebUI/actions/workflows/build.yml/badge.svg)](https://github.com/wxh1024/ZenithProxy-WebUI/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/wxh1024/ZenithProxy-WebUI?sort=semver)](https://github.com/wxh1024/ZenithProxy-WebUI/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![ZenithProxy](https://img.shields.io/badge/ZenithProxy-plugin-6f42c1)](https://github.com/rfresh2/ZenithProxy)
+[![Minecraft](https://img.shields.io/badge/Minecraft-1.21.4-62B47A?logo=minecraft&logoColor=white)](https://github.com/rfresh2/ZenithProxy)
+[![Java](https://img.shields.io/badge/Java-21-ED8F03?logo=openjdk&logoColor=white)](https://adoptium.net/)
+[![Downloads](https://img.shields.io/github/downloads/wxh1024/ZenithProxy-WebUI/total)](https://github.com/wxh1024/ZenithProxy-WebUI/releases)
 
 基于浏览器的 ZenithProxy 管理面板，提供实时状态监控、配置管理、命令执行和日志查看功能。
 
