@@ -2,6 +2,20 @@
 
 遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
+## [未发布]
+
+### 许可证
+
+- 项目改为 **AGPL-3.0-or-later**（GNU Affero 通用公共许可证 v3 或更高版本）开源，
+  新增根目录 `LICENSE`（官方英文全文）。
+- `shadowJar` 清单新增 `License` 与 `Implementation-Vendor` 字段。
+- README 增加许可证徽章、许可义务说明（分发附带源码、修改同样开源、AGPL 第 13 条网络服务条款）。
+
+### 文档
+
+- 新增 GitHub Wiki：安装与部署、配置说明、功能说明、API 参考、架构与代码结构、
+  认证与安全、开发与发布、常见问题。
+
 ## [1.4.0] - 2026-10-17
 
 ### 变更

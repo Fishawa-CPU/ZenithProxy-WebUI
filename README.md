@@ -1,8 +1,13 @@
 # ZenithProxy Web UI
 
 [![Build](https://github.com/wxh1024/ZenithProxy-WebUI/actions/workflows/build.yml/badge.svg)](https://github.com/wxh1024/ZenithProxy-WebUI/actions/workflows/build.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 基于浏览器的 ZenithProxy 管理面板，提供实时状态监控、配置管理、命令执行和日志查看功能。
+
+> 本项目以 [GNU Affero 通用公共许可证 v3.0 或更高版本](LICENSE)（AGPL-3.0-or-later）开源。
+>
+> 完整技术文档（安装、配置、API、架构、安全、开发与发布）见 [Wiki](../../wiki)。
 
 ## 功能特性
 
@@ -133,7 +138,7 @@ http://localhost:8080
 
 - 使用 `webui_token` HttpOnly Cookie（SameSite=Lax, Path=/）
 - 也支持 `Authorization: Bearer <token>` Header
-- Token 有效期 24 小时，每次请求滚动刷新
+- Token 有效期 24 小时（`auth.tokenExpiry` 可调），不做滑动续期，到期需重新登录
 - 速率限制：同一 IP 每分钟最多 5 次登录失败（登录成功会清零计数）
 - SSE 连接同样需要认证（通过 Cookie 自动传递），Token 失效时连接被立即关闭
 - 30 秒的通道级认证缓存会在登出/改密时通过认证代数（epoch）立即失效
@@ -216,3 +221,33 @@ git push origin main --tags
 
 推送 `v*` 标签后，CI 会自动构建并创建 GitHub Release，附带 fat JAR。
 版本号不一致时 CI 会直接失败。
+
+## 开源许可
+
+本项目采用 **GNU Affero 通用公共许可证第 3 版（或更高版本）**，全文见 [LICENSE](LICENSE)。
+
+```
+ZenithProxy WebUI — browser-based management dashboard for ZenithProxy
+Copyright (C) 2026 wxh1024
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+```
+
+这意味着你可以自由使用、修改和分发本项目，但需要遵守以下义务：
+
+- **分发时附带源码**：分发本插件（包括打包进整合包或二次分发的 JAR）时，必须一并提供
+  完整对应的源码，或给出可获取源码的书面承诺。
+- **修改同样开源**：基于本项目的衍生作品必须继续以 AGPL-3.0 授权。
+- **网络服务条款（AGPL 第 13 条）**：这是 AGPL 与 GPL 的关键差异。如果你修改了本项目并通过
+  网络向他人提供访问（例如把带 Web UI 的 ZenithProxy 作为公开服务运行），必须向这些用户
+  提供获取修改后源码的途径（通常在界面上放置“源码”链接即可）。
+- **保留声明**：不得移除源码中的版权声明与许可声明。
+
+自行搭建、供个人或团队内部使用（未对外提供服务）不触发源码提供义务。
+
+第三方依赖的许可见各自项目：[Netty](https://netty.io/)（Apache-2.0）、
+[Gson](https://github.com/google/gson)（Apache-2.0）、[Chart.js](https://www.chartjs.org/)（MIT）。
+`libs/ZenithProxy.jar` 为编译期依赖（`compileOnly`），不随本项目分发。

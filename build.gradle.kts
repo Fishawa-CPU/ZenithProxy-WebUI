@@ -27,7 +27,9 @@ tasks.shadowJar {
     manifest {
         attributes(
             "Implementation-Title" to "ZenithProxy WebUI Plugin",
-            "Implementation-Version" to project.version
+            "Implementation-Version" to project.version,
+            "Implementation-Vendor" to "wxh1024",
+            "License" to "AGPL-3.0-or-later"
         )
     }
 }
