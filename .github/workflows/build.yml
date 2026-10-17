@@ -22,16 +22,16 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Read and verify version
         id: version
@@ -60,7 +60,7 @@ jobs:
           unzip -l "$jar" | grep -E "zenithproxy.plugin.json|web/index.html"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ZenithProxy-WebUI-${{ steps.version.outputs.version }}
           path: build/libs/ZenithProxy-WebUI-*.jar
@@ -76,7 +76,7 @@ jobs:
       contents: write
     steps:
       - name: Download built JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ZenithProxy-WebUI-${{ needs.build.outputs.version }}
           path: dist
