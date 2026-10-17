@@ -1,5 +1,7 @@
 # ZenithProxy Web UI
 
+[![Build](https://github.com/wxh1024/ZenithProxy-WebUI/actions/workflows/build.yml/badge.svg)](https://github.com/wxh1024/ZenithProxy-WebUI/actions/workflows/build.yml)
+
 基于浏览器的 ZenithProxy 管理面板，提供实时状态监控、配置管理、命令执行和日志查看功能。
 
 ## 功能特性
@@ -19,15 +21,19 @@
 
 ### 1. 构建插件
 
+方式一：从 [Releases](https://github.com/wxh1024/ZenithProxy-WebUI/releases) 下载已编译的 JAR。
+
+方式二：本地构建（需要 JDK 21）：
+
 ```bash
 ./gradlew shadowJar
 ```
 
-输出文件：`build/libs/ZenithProxy-WebUI-1.2.0.jar`
+输出文件：`build/libs/ZenithProxy-WebUI-1.4.0.jar`
 
 ### 2. 安装插件
 
-将 `ZenithProxy-WebUI-1.2.0.jar` 复制到 ZenithProxy 的 `plugins/` 目录。
+将 `ZenithProxy-WebUI-1.4.0.jar` 复制到 ZenithProxy 的 `plugins/` 目录。
 
 ### 3. 配置文件
 
@@ -125,12 +131,12 @@ http://localhost:8080
 
 ## 认证机制
 
-- 使用 `webui_token` HttpOnly Cookie（SameSite=Strict, Path=/）
+- 使用 `webui_token` HttpOnly Cookie（SameSite=Lax, Path=/）
 - 也支持 `Authorization: Bearer <token>` Header
 - Token 有效期 24 小时，每次请求滚动刷新
-- 速率限制：同一 IP 每 15 分钟最多 5 次登录失败
-- SSE 连接同样需要认证（通过 Cookie 自动传递）
-- 过期 Token 在仪表盘更新周期（每秒）中被检测并断开
+- 速率限制：同一 IP 每分钟最多 5 次登录失败（登录成功会清零计数）
+- SSE 连接同样需要认证（通过 Cookie 自动传递），Token 失效时连接被立即关闭
+- 30 秒的通道级认证缓存会在登出/改密时通过认证代数（epoch）立即失效
 
 ## 故障排除
 
@@ -172,17 +178,18 @@ Default username: admin, password: xxxxxxxx
 
 ```
 src/main/java/com/zenith/webui/
-  WebUIPlugin.java          # 插件入口，HTTP 处理器，SSE，静态文件服务，Logback Appender
+  WebUIPlugin.java          # 插件入口：生命周期、SSE 广播、日志缓冲区
   TitlePacketHandler.java   # Title 包拦截处理
-  auth/
-    AuthHandler.java        # 认证过滤器（Cookie + Bearer Token 提取/验证）
-    AuthManager.java        # Token 生成与验证、速率限制
-    AuthController.java     # 登录/登出/状态 HTTP 处理
-  config/
-    WebUIConfig.java        # 配置数据类（端口、认证）
-    ConfigManager.java      # 配置文件管理（首次启动自动生成随机密码）
-  queue/
-    QueueParser.java        # 2b2t 队列位置解析
+  api/                      # /api 处理器：命令、仪表盘、日志流、白名单
+  auth/                     # Token 认证：过滤器、管理器、登录/登出
+  authbypass/               # 离线认证绕过包处理器
+  command/                  # /webui enable|disable|status
+  config/                   # 配置数据类与 config.json 管理
+  http/HttpHelper.java      # HTTP 响应工具 + 共享 Gson + SSE 帧构造
+  queue/QueueParser.java    # 3c3u.org / 2b2t.org 队列位置解析
+  server/                   # Netty 启动与请求路由
+  staticfile/               # 静态文件服务（LRU 缓存）
+  terminal/                 # 日志翻译、Logback Appender、LogEntry
 
 src/main/resources/
   web/
@@ -192,3 +199,20 @@ src/main/resources/
     styles.css              # 样式（Catppuccin Macchiato 配色）
   zenithproxy.plugin.json   # 插件元数据
 ```
+
+## CI 与发布
+
+`.github/workflows/build.yml` 在每次 push / PR 时用 JDK 21 构建，并上传
+`ZenithProxy-WebUI-<version>.jar` 作为 workflow 产物（保留 30 天）。
+
+发布新版本：
+
+```bash
+# 同步修改 build.gradle.kts 与 zenithproxy.plugin.json 中的 version
+git commit -am "chore: release v1.4.0"
+git tag v1.4.0
+git push origin main --tags
+```
+
+推送 `v*` 标签后，CI 会自动构建并创建 GitHub Release，附带 fat JAR。
+版本号不一致时 CI 会直接失败。

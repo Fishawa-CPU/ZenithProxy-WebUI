@@ -8,26 +8,32 @@ A ZenithProxy plugin providing a browser-based management dashboard. Java backen
 
 ```bash
 ./gradlew build          # compiles + shadow JAR
-./gradlew shadowJar      # fat JAR only (output: build/libs/ZenithProxy-WebUI-1.0.0.jar)
+./gradlew shadowJar      # fat JAR only (output: build/libs/ZenithProxy-WebUI-1.4.0.jar)
 ```
 
 Requires **Java 21** (set in `build.gradle.kts` toolchain). No test suite exists.
+
+CI lives in `.github/workflows/build.yml`: every push/PR builds the fat JAR and uploads it as
+a workflow artifact; pushing a `v*` tag also publishes a GitHub Release with the JAR attached.
 
 ## Project Structure
 
 ```
 src/main/java/com/zenith/webui/
-  WebUIPlugin.java          # Plugin entrypoint, HTTP handlers, SSE, static file server, log appender
+  WebUIPlugin.java          # Plugin entrypoint, lifecycle, SSE broadcast, log buffer
   TitlePacketHandler.java   # Title packet handler
-  auth/
-    AuthHandler.java        # Authentication filter (cookie + bearer token)
-    AuthManager.java        # Token generation, validation, rate limiting
-    AuthController.java     # Login/logout/status HTTP handlers
-  config/
-    WebUIConfig.java        # Configuration data class (auth, port, enabled)
-    ConfigManager.java      # Config file management (auto-generates random password on first run)
-  queue/
-    QueueParser.java        # 2b2t queue position packet parser
+  api/                      # /api handlers: commands, dashboard, log stream, whitelist
+    DashboardHandler.java   # Aggregated dashboard payload (POJO → Gson)
+    DashboardData.java      # Dashboard DTO — field names are the frontend contract
+  auth/                     # Token auth: filter, manager, login/logout controller
+  authbypass/               # Offline-auth bypass packet handlers (hybrid-auth servers)
+  command/                  # /webui enable|disable|status
+  config/                   # WebUIConfig data class + config.json manager
+  http/HttpHelper.java      # Response helpers + shared Gson (+ SSE frame builder)
+  queue/QueueParser.java    # 3c3u.org / 2b2t.org queue-position packet parser
+  server/                   # Netty bootstrap + request routing
+  staticfile/               # Static file serving with bounded LRU cache
+  terminal/                 # Log translation, Logback appender, LogEntry DTO
 src/main/resources/
   web/
     index.html, app.js, styles.css   # Frontend (vanilla JS, no build step)
@@ -45,18 +51,22 @@ plugins/webui/
 
 ## Key Facts for Agents
 
-- **No tests, no CI, no linter.** There is no verification step beyond `./gradlew build`.
-- **External dependency**: `ZenithProxy.jar` in `libs/` directory (compileOnly). If the build fails on dependency resolution, the JAR may be missing or outdated.
+- **No test suite, no linter.** CI (`.github/workflows/build.yml`) is the only verification step; it compiles, checks the version pair (build.gradle.kts ↔ plugin.json) and uploads the JAR.
+- **External dependency**: `ZenithProxy.jar` in `libs/` directory (compileOnly, committed to git). If the build fails on dependency resolution, the JAR may be missing or outdated.
 - **NIO Server**: Uses Netty `NioServerSocketChannel` for non-blocking I/O with zero-copy file transfer.
-- **Static file serving**: Serves from classpath `/web/` first, then falls back to `plugins/webui/web/` at runtime. File cache is bounded at 128 entries.
-- **SSE (Server-Sent Events)**: Real-time log streaming via `/api/logs/stream` and dashboard metrics via `/api/dashboard/stream`. Uses Netty channels with CopyOnWriteArrayList for thread-safe client management.
-- **CORS**: All response handlers (sendJson, sendBytes, sendNotFound, sendCorsResponse, AuthController) set `Access-Control-Allow-Origin: *`. CORS preflight also allows `Authorization` header.
-- **Independent config**: Plugin config stored in `plugins/webui/config.json`, separate from main ZenithProxy config. On first run, a random password is generated (logged for the admin).
-- **Log translation**: Common English log messages are auto-translated to Chinese before pushing to SSE. Translation keys are sorted by length descending to prevent partial-match issues.
-- **Whitelist management**: Full CRUD API at `/api/whitelist` with enable/disable, add/remove, kick message, and auto-add bot account settings. Directly modifies the main ZenithProxy CONFIG object (persistence is handled by ZenithProxy itself).
-- **Thread safety**: `WebUIPlugin.instance` is `volatile`. Logback appender uses a local snapshot to avoid TOCTOU after `stop()`. `AuthManager.lastRateLimitCleanup` is `volatile`. SSE client lists use `CopyOnWriteArrayList`. Log buffer uses `ConcurrentLinkedDeque`.
-- **start() idempotency**: `start()` checks server running state and cleans stale Netty resources before initializing. Returns `boolean` for callers to detect failure. On failure, all partially-initialized resources are cleaned up.
-- **Input validation**: POST handlers validate JSON body is non-empty and required fields exist before processing. Empty commands are rejected with an error response.
+- **JSON policy**: every response body and SSE frame is produced by Gson (`HttpHelper.GSON` / `GSON_NULLS` / `sseFrame`). Never assemble JSON with `StringBuilder` — the old hand-rolled escaping silently dropped control characters and broke `JSON.parse` in the browser.
+- **Dashboard nulls**: `DashboardData` is serialized with `GSON_NULLS` because `player.health`/`player.food` must appear as explicit `null` when the bot is offline; the default Gson would omit the fields.
+- **Static file serving**: Serves from classpath `/web/` first, then falls back to `plugins/webui/web/` at runtime. File cache is bounded at 128 entries. Filesystem paths are normalized and must stay inside the web directory (blocks `/C:/...` traversal on Windows).
+- **SSE (Server-Sent Events)**: `/api/logs/stream` and `/api/dashboard/stream`. Uses Netty channels with `CopyOnWriteArrayList` for thread-safe client management.
+- **CORS**: All response helpers set `Access-Control-Allow-Origin: *`. Preflight also allows `Authorization`.
+- **Independent config**: `plugins/webui/config.json`, separate from the main ZenithProxy config. On first run a random password is generated and logged. `enabled: false` skips auto-start; `/webui enable` still works.
+- **Log translation**: Common English log messages are auto-translated to Chinese before pushing to SSE. Keys are sorted by length descending to prevent partial matches.
+- **Whitelist management**: Full CRUD API at `/api/whitelist`. Directly modifies the main ZenithProxy CONFIG object (persistence is handled by ZenithProxy itself).
+- **Thread safety**: `WebUIPlugin.instance` is `volatile`. Logback appender uses a local snapshot to avoid TOCTOU after `stop()`. SSE client lists use `CopyOnWriteArrayList`. Log buffer uses `ConcurrentLinkedDeque<LogEntry>` plus an approximate size counter.
+- **start() idempotency**: `start()` returns early when the server is already running, so repeated `/webui enable` cannot register duplicate packet codecs, log appenders or event subscribers. Returns `boolean` for callers to detect failure.
+- **stop() semantics**: `stop()` disables the WebUI but does not shut down `AuthManager` (tokens must survive a disable/enable cycle). It is safe to call repeatedly.
+- **Auth cache**: `AuthHandler` caches successful validation per TCP channel for 30s, guarded by `AuthManager.epoch()` — logout/password change bumps the epoch and invalidates every channel's cache immediately.
+- **Input validation**: POST handlers validate JSON body is non-empty and required fields exist before processing. Unsupported methods return `405`, unknown `/api/*` paths return `404` (never the SPA index).
 
 ## Configuration
 
@@ -98,8 +108,8 @@ To disable authentication, set `auth.enabled` to `false` in config.json.
 
 ### Notes
 
-- **Auth**: Cookie-based via `webui_token` (HttpOnly, SameSite=Strict, Path=/). Also supports `Authorization: Bearer <token>` header.
-- **SSE authentication**: SSE connections (EventSource) automatically send cookies for same-origin requests. Client tokens are stored per-channel and validated every dashboard update cycle. Expired tokens cause channel closure.
+- **Auth**: Cookie-based via `webui_token` (HttpOnly, SameSite=Lax, Path=/). Also supports `Authorization: Bearer <token>`. Blank/missing password in config.json triggers regeneration with a random password.
+- **SSE authentication**: EventSource sends cookies for same-origin requests. Channels are tied to their token and closed when the token is revoked.
 - **Aggregated dashboard**: The single `/api/dashboard` endpoint replaces what was previously planned as separate endpoints (`/api/status`, `/api/players`, `/api/queue`, `/api/system`, `/api/latency`).
 - **Static files**: All non-API paths serve static files without authentication (required for login page, JS, CSS). This includes `/`, `/index.html`, `/login.html`, `/app.js`, `/styles.css`, and any custom files in `plugins/webui/web/`.
 - **Config save**: The main ZenithProxy config is managed by ZenithProxy itself. The WebUI plugin reads/writes `CONFIG` in memory but does not trigger saves — the proxy handles persistence.
@@ -131,13 +141,13 @@ If the command produces structured output (embed, multi-line), it is converted t
 2. User submits credentials → `POST /api/auth/login` → on success receives HttpOnly `webui_token` cookie → redirect to `/`
 3. All subsequent API calls include the cookie automatically
 4. Token expires after 24 hours of inactivity (rolling expiration on each request)
-5. Rate limiting: 5 failed attempts per 15 minutes per IP
+5. Rate limiting: 5 failed attempts per minute per IP (successful logins clear the counter)
 
 ## Conventions
 
 - Frontend is vanilla HTML/CSS/JS — no framework, no npm, no bundler.
 - Java backend uses Netty NIO (non-blocking I/O with event loop).
-- JSON serialization via Gson (not Jackson).
+- JSON serialization via Gson (not Jackson), always through `HttpHelper` — no hand-built JSON strings.
 - Plugin API uses ZenithProxy's `ZenithProxyPlugin` interface with `onLoad(PluginAPI)`.
 - UI text is in Chinese (zh-CN) with English subtitles via `.en` span elements.
 - CSS uses Catppuccin Macchiato color palette with `--ctp-*` variables.
