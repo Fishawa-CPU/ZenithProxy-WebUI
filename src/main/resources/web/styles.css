@@ -1,6 +1,4 @@
 /* Catppuccin Macchiato - Flat Design */
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 * {
     margin: 0;
     padding: 0;
@@ -57,7 +55,7 @@
 }
 
 body {
-    font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', system-ui, sans-serif;
     background-color: var(--background-color);
     color: var(--text-color);
     line-height: 1.5;
@@ -489,7 +487,7 @@ body {
     flex-direction: column;
     flex: 1;
     background-color: var(--ctp-crust);
-    font-family: 'JetBrains Mono', 'Menlo', 'Ubuntu Mono', monospace;
+    font-family: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'Menlo', monospace;
     overflow: hidden;
 }
 
@@ -684,7 +682,7 @@ body {
     color: var(--ctp-subtext1);
     cursor: pointer;
     transition: background-color 0.1s ease;
-    font-family: 'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+    font-family: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'Menlo', monospace;
     white-space: nowrap;
     overflow: hidden;
 }
@@ -939,7 +937,7 @@ body {
 }
 
 .latency-item .ping-value {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', monospace;
     font-size: 0.72rem;
 }
 
@@ -1107,7 +1105,7 @@ body {
 }
 
 .whitelist-entry-uuid {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', monospace;
     font-size: 0.75rem;
     color: var(--ctp-overlay1);
     flex: 1;

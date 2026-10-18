@@ -9,3 +9,18 @@ libs/
 out/
 log/
 .workbuddy/
+
+# 打包进来的子项目里的 gradle wrapper 是必需的
+!/zenithproxy/gradle/wrapper/gradle-wrapper.jar
+
+# 构建与运行产物
+dist/
+bots/
+profile/
+manager/jp-temp/
+manager/dist/
+manager/dist-installer/
+
+# WiX 工具链（构建时自动下载）
+tools/wix/
+dist/tmp/

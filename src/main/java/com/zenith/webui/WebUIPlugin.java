@@ -98,11 +98,19 @@ public class WebUIPlugin implements ZenithProxyPlugin {
     private WebUILogHandler logHandler;
 
     /**
-     * 数据包编解码器只能注册一次：{@code PacketCodecRegistries} 是全局注册表，
+    /**
+     * 数据包编解码器只能注册一次：`PacketCodecRegistries` 是全局注册表，
      * 没有反注册路径，重复注册会让队列/标题包被处理多遍。
      */
     private volatile boolean coreHandlersRegistered = false;
     private volatile boolean authBypasserRegistered = false;
+
+    /**
+     * 当前生效的插件配置。未加载完成时返回 null。
+     */
+    public com.zenith.webui.config.WebUIConfig config() {
+        return configManager == null ? null : configManager.getConfig();
+    }
 
     // ── Adventure serialiser ──────────────────────────────────
     private static final LegacyComponentSerializer LEGACY_SERIALIZER =

@@ -1,0 +1,11 @@
+src/main/resources/
+docs/
+licenses/
+gradle/
+*.md
+*.json
+*.lock
+*.yml
+*.yaml
+src/main/java/com/zenith/mc/*/*Registry.java
+src/main/java/com/zenith/mc/item/ItemTags.java

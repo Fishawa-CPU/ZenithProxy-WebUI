@@ -5,10 +5,10 @@ let currentUsername = 'root';
 // Auth check
 (async function checkAuth() {
     try {
-        const response = await fetch('/api/auth/status', { credentials: 'include' });
+        const response = await fetch('api/auth/status', { credentials: 'include' });
         const data = await response.json();
         if (!data.authenticated) {
-            window.location.href = '/login.html';
+            window.location.href = 'login.html';
             return;
         }
         currentUsername = data.username || 'root';
@@ -23,26 +23,27 @@ let currentUsername = 'root';
         if (terminalUsername) terminalUsername.textContent = currentUsername;
         if (terminalPromptUser) terminalPromptUser.textContent = currentUsername;
     } catch (e) {
-        window.location.href = '/login.html';
+        window.location.href = 'login.html';
     }
 })();
 
 async function logout() {
     try {
-        await fetch('/api/auth/logout', {
+        await fetch('api/auth/logout', {
             method: 'POST',
             credentials: 'include'
         });
     } catch (e) {
         // ignore
     }
-    window.location.href = '/login.html';
+    window.location.href = 'login.html';
 }
 
 let logs = [];
 let commandHistory = [];
 let historyIndex = -1;
-const API_BASE = window.location.origin + '/api';
+// 相对路径：直接访问时等价于 /api，反代到 /bot/<name>/ 下时自动变为 /bot/<name>/api
+const API_BASE = new URL('api', document.baseURI).href.replace(/\/$/, '');
 
 let autocompleteIndex = -1;
 let autocompleteSuggestions = [];
@@ -112,23 +113,34 @@ let serverCommands = normalizeCommands(KNOWN_COMMANDS);
 let aliasMap = {};
 
 // ── Init ──────────────────────────────────────
+/** 逐个执行初始化步骤：任何一步失败都不影响后面，避免整页卡死。 */
+function safeInit(name, fn) {
+    try {
+        fn();
+    } catch (e) {
+        console.error('[WebUI] 初始化失败: ' + name, e);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-    initNavigation();
-    initTerminal();
+    safeInit('导航', initNavigation);
+    safeInit('终端', initTerminal);
 
     // Whitelist add input Enter key
-    const wlInput = document.getElementById('whitelistAddInput');
-    if (wlInput) {
-        wlInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); addWhitelistPlayer(); }
-        });
-    }
+    safeInit('白名单输入框', () => {
+        const wlInput = document.getElementById('whitelistAddInput');
+        if (wlInput) {
+            wlInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); addWhitelistPlayer(); }
+            });
+        }
+    });
 
-    loadDashboard();
-    initCharts();
-    startSystemPolling();
-    loadCommands();
-    startLogPolling();
+    safeInit('仪表板', loadDashboard);
+    safeInit('图表', initCharts);
+    safeInit('系统轮询', startSystemPolling);
+    safeInit('命令列表', loadCommands);
+    safeInit('日志轮询', startLogPolling);
 });
 
 // ── Navigation ────────────────────────────────
@@ -181,7 +193,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
         if (body) opts.body = JSON.stringify(body);
         const r = await fetch(API_BASE + endpoint, opts);
         if (r.status === 401) {
-            window.location.href = '/login.html';
+            window.location.href = 'login.html';
             return null;
         }
         return await r.json();
@@ -191,7 +203,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 // ── Log SSE Stream ────────────────────────────
 function startLogPolling() {
     if (logEventSource) return;
-    logEventSource = new EventSource('/api/logs/stream');
+    logEventSource = new EventSource('api/logs/stream');
     logEventSource.onmessage = (event) => {
         try {
             const log = JSON.parse(event.data);
@@ -388,6 +400,11 @@ function makeDS(label, color, bg) {
 
 function initCharts() {
     if (chartsInitialized) return;
+    // Chart.js 未加载成功时直接跳过：不能让图表异常打断后面的仪表板/日志初始化
+    if (typeof Chart === 'undefined') {
+        console.warn('[WebUI] Chart.js 未加载，图表不可用（其余功能正常）');
+        return;
+    }
     chartsInitialized = true;
     const tl = makeTimeLabels(MAX_DATA_POINTS);
     cpuChart = new Chart(document.getElementById('cpuChart'), { type: 'line', data: { labels: tl, datasets: [makeDS('CPU', chartColors.cpu, chartColors.cpuBg)] }, options: makeChartOptions('%', 100) });
@@ -404,7 +421,7 @@ let dashboardReconnectDelay = 1000;
 
 function startSystemPolling() {
     if (dashboardEventSource) return;
-    dashboardEventSource = new EventSource('/api/dashboard/stream');
+    dashboardEventSource = new EventSource('api/dashboard/stream');
     dashboardEventSource.onmessage = (event) => {
         if (currentPage !== 'dashboard') return;
         try {
@@ -541,7 +558,7 @@ function processDashboardData(d) {
 async function loadCommands() {
     try {
         const r = await fetch(API_BASE + '/commands', { credentials: 'include' });
-        if (r.status === 401) { window.location.href = '/login.html'; return; }
+        if (r.status === 401) { window.location.href = 'login.html'; return; }
         const d = await r.json();
         if (Array.isArray(d) && d.length > 0) {
             serverCommands = normalizeCommands(d);

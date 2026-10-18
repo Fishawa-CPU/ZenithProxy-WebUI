@@ -77,6 +77,15 @@ public class AuthController {
      * Handle check auth status
      */
     public void handleStatus(ChannelHandlerContext ctx, FullHttpRequest request) {
+        // 认证关闭时（例如由外层 Bot Manager 统一把关），前端应直接进入主界面，
+        // 否则 app.js 会因为 authenticated=false 把用户踢回登录页。
+        var cfg = com.zenith.webui.WebUIPlugin.instance;
+        if (cfg != null && cfg.config() != null && !cfg.config().auth.enabled) {
+            sendJson(ctx, HttpResponseStatus.OK,
+                Map.of("authenticated", true, "username", "anonymous"));
+            return;
+        }
+
         String token = AuthHandler.extractToken(request);
         String username = token != null ? authManager.validateToken(token) : null;
 
